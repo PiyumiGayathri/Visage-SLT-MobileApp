@@ -1,0 +1,203 @@
+import 'package:flutter/material.dart';
+import 'face_verification_screen.dart';
+
+class LocationVerifiedScreen extends StatelessWidget {
+  const LocationVerifiedScreen({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: Container(
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [
+              Color(0xFF1a1a2e),
+              Color(0xFF16213e),
+              Color(0xFF0f3460),
+            ],
+          ),
+        ),
+        child: SafeArea(
+          child: Center(
+            child: SingleChildScrollView(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 24.0),
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 500),
+                  child: const VerificationCard(),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class VerificationCard extends StatelessWidget {
+  const VerificationCard({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(32.0),
+      decoration: BoxDecoration(
+        color: const Color(0xFF1e2a3a).withOpacity(0.8),
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(
+          color: Colors.white.withOpacity(0.1),
+          width: 1,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.3),
+            blurRadius: 20,
+            offset: const Offset(0, 10),
+          ),
+        ],
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const AppTitle(),
+          const SizedBox(height: 32),
+          const VerificationStatus(),
+          const SizedBox(height: 24),
+          const StatusMessage(),
+          const SizedBox(height: 40),
+          ActionButton(
+            label: 'Clock In',
+            color: const Color(0xFF4CAF50),
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => const FaceVerificationScreen(action: 'in'),
+                ),
+              );
+            },
+          ),
+          const SizedBox(height: 16),
+          ActionButton(
+            label: 'Clock Out',
+            color: const Color(0xFFE53935),
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => const FaceVerificationScreen(action: 'out'),
+                ),
+              );
+            },
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class AppTitle extends StatelessWidget {
+  const AppTitle({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Text(
+      'VISAGE',
+      style: TextStyle(
+        fontSize: MediaQuery.of(context).size.width > 400 ? 48 : 40,
+        fontWeight: FontWeight.bold,
+        color: Colors.white,
+        letterSpacing: 8,
+      ),
+    );
+  }
+}
+
+class VerificationStatus extends StatelessWidget {
+  const VerificationStatus({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 80,
+      height: 80,
+      decoration: BoxDecoration(
+        color: const Color(0xFF4CAF50),
+        shape: BoxShape.circle,
+        boxShadow: [
+          BoxShadow(
+            color: const Color(0xFF4CAF50).withOpacity(0.4),
+            blurRadius: 20,
+            spreadRadius: 2,
+          ),
+        ],
+      ),
+      child: const Icon(
+        Icons.check,
+        color: Colors.white,
+        size: 48,
+      ),
+    );
+  }
+}
+
+class StatusMessage extends StatelessWidget {
+  const StatusMessage({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Text(
+      'Location verified. Please select\nan action.',
+      textAlign: TextAlign.center,
+      style: TextStyle(
+        fontSize: MediaQuery.of(context).size.width > 400 ? 18 : 16,
+        color: Colors.white.withOpacity(0.9),
+        height: 1.5,
+      ),
+    );
+  }
+}
+
+class ActionButton extends StatelessWidget {
+  final String label;
+  final Color color;
+  final VoidCallback onPressed;
+
+  const ActionButton({
+    super.key,
+    required this.label,
+    required this.color,
+    required this.onPressed,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: double.infinity,
+      child: ElevatedButton(
+        onPressed: onPressed,
+        style: ElevatedButton.styleFrom(
+          backgroundColor: color,
+          foregroundColor: Colors.white,
+          padding: const EdgeInsets.symmetric(vertical: 18),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
+          elevation: 4,
+          shadowColor: color.withOpacity(0.5),
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            fontSize: MediaQuery.of(context).size.width > 400 ? 20 : 18,
+            fontWeight: FontWeight.w600,
+            letterSpacing: 1,
+          ),
+        ),
+      ),
+    );
+  }
+}
