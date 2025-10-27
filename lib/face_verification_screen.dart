@@ -225,14 +225,13 @@ class _FaceVerificationScreenState extends State<FaceVerificationScreen> {
           ? Stack(
         children: [
           // Camera preview
-          Center(
-            child: AspectRatio(
-              aspectRatio: _controller!.value.aspectRatio,
-              child: CameraPreview(_controller!),
-            ),
+          Positioned.fill(
+            child: CameraPreview(_controller!),
           ),
           // Face frame overlay
-          Center(
+          Positioned(
+            top: MediaQuery.of(context).size.height * 0.2,
+            left: MediaQuery.of(context).size.width * 0.5 - 140,
             child: Container(
               width: 280,
               height: 380,
