@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'package:permission_handler/permission_handler.dart';
+import 'dart:async';
 
 class FaceVerificationScreen extends StatefulWidget {
   final String action; // 'in' or 'out'
@@ -23,6 +24,9 @@ class _FaceVerificationScreenState extends State<FaceVerificationScreen> {
   bool _isInitialized = false;
   bool _isProcessing = false;
   String _statusMessage = 'Requesting camera permission...';
+  Timer? _captureTimer;
+  bool _faceDetected = false;
+  String? _detectedEmpID;
 
   @override
   void initState() {
@@ -77,11 +81,111 @@ class _FaceVerificationScreenState extends State<FaceVerificationScreen> {
           _isInitialized = true;
           _statusMessage = 'Position your face in the frame';
         });
+        _startAutomaticCapture();
       }
     } catch (e) {
       setState(() {
         _statusMessage = 'Camera error: ${e.toString()}';
       });
+    }
+  }
+
+  void _startAutomaticCapture() {
+    _captureTimer = Timer.periodic(const Duration(seconds: 2), (timer) {
+      if (_isInitialized && !_isProcessing && mounted) {
+        _captureAndVerifyAutomatic();
+      }
+    });
+  }
+
+  Future<void> _captureAndVerifyAutomatic() async {
+    if (_controller == null || !_controller!.value.isInitialized || _isProcessing) {
+      return;
+    }
+
+    setState(() {
+      _isProcessing = true;
+    });
+
+    try {
+      final image = await _controller!.takePicture();
+      final result = await _verifyFaceWithBackend(image.path);
+
+      if (result['success'] == true && result['user'] != null) {
+        // Face detected!
+        setState(() {
+          _faceDetected = true;
+          _detectedEmpID = result['user'];
+          _statusMessage = 'Face verified! Marking attendance...';
+        });
+
+        // Stop the timer
+        _captureTimer?.cancel();
+
+        // Automatically mark attendance
+        await _markAttendance(result['user']);
+      } else {
+        // Face not detected
+        setState(() {
+          _faceDetected = false;
+          _detectedEmpID = null;
+          _statusMessage = result['message'] ?? 'Position your face in the frame';
+        });
+      }
+    } catch (e) {
+      setState(() {
+        _faceDetected = false;
+        _statusMessage = 'Scanning...';
+      });
+    } finally {
+      setState(() {
+        _isProcessing = false;
+      });
+    }
+  }
+
+  Future<void> _markAttendance(String empID) async {
+    const apiUrl = 'https://ientrada.raccoon-ai.io/api/mark_atendance';
+
+    try {
+      final response = await http.post(
+        Uri.parse(apiUrl),
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        body: {
+          'api': 'NsHPq832MX',
+          'user': 'FaceAccuracyTesting',
+          'other': widget.action == 'in' ? 'I' : 'O',
+          'empID': empID,
+          'detpoint': 'test_group',
+        },
+      );
+
+      if (response.statusCode == 200) {
+        if (mounted) {
+          Navigator.pop(context);
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Successfully clocked ${widget.action}!'),
+              backgroundColor: Colors.green,
+              duration: const Duration(seconds: 2),
+            ),
+          );
+        }
+      } else {
+        setState(() {
+          _statusMessage = 'Attendance marking failed. Please try again.';
+          _faceDetected = false;
+        });
+        _startAutomaticCapture(); // Restart scanning
+      }
+    } catch (e) {
+      setState(() {
+        _statusMessage = 'Network error. Please try again.';
+        _faceDetected = false;
+      });
+      _startAutomaticCapture(); // Restart scanning
     }
   }
 
@@ -118,78 +222,31 @@ class _FaceVerificationScreenState extends State<FaceVerificationScreen> {
     );
   }
 
-  Future<void> _captureAndVerify() async {
-    if (_controller == null || !_controller!.value.isInitialized || _isProcessing) {
-      return;
-    }
-
-    setState(() {
-      _isProcessing = true;
-      _statusMessage = 'Capturing and verifying...';
-    });
-
-    try {
-      final image = await _controller!.takePicture();
-
-      // Call your backend API
-      final result = await _verifyFaceWithBackend(image.path);
-
-      if (result['success'] == true) {
-        if (mounted) {
-          Navigator.pop(context);
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('Successfully clocked ${widget.action}'),
-              backgroundColor: Colors.green,
-              duration: const Duration(seconds: 2),
-            ),
-          );
-        }
-      } else {
-        setState(() {
-          _statusMessage = result['message'] ?? 'Verification failed. Please try again.';
-          _isProcessing = false;
-        });
-
-        // Reset message after 3 seconds
-        Future.delayed(const Duration(seconds: 3), () {
-          if (mounted) {
-            setState(() {
-              _statusMessage = 'Position your face in the frame';
-            });
-          }
-        });
-      }
-    } catch (e) {
-      setState(() {
-        _statusMessage = 'Error: ${e.toString()}';
-        _isProcessing = false;
-      });
-
-      // Reset message after 3 seconds
-      Future.delayed(const Duration(seconds: 3), () {
-        if (mounted) {
-          setState(() {
-            _statusMessage = 'Position your face in the frame';
-          });
-        }
-      });
-    }
-  }
-
   Future<Map<String, dynamic>> _verifyFaceWithBackend(String imagePath) async {
-    // Replace with your actual API endpoint
-    const apiUrl = 'https://your-api-endpoint.com/verify-face';
+    const apiUrl = 'https://ientrada.raccoon-ai.io/api/face_verification';
 
     try {
       var request = http.MultipartRequest('POST', Uri.parse(apiUrl));
+      request.headers['api'] = 'NsHPq832MX';
+      request.headers['user'] = 'FaceAccuracyTesting';
       request.files.add(await http.MultipartFile.fromPath('image', imagePath));
-      request.fields['action'] = widget.action;
 
       var response = await request.send();
       var responseData = await response.stream.bytesToString();
+      var jsonResponse = json.decode(responseData);
 
-      return json.decode(responseData);
+      if (jsonResponse['msg'] == 'Verification Success.') {
+        return {
+          'success': true,
+          'user': jsonResponse['user'],
+          'message': 'Face verified!'
+        };
+      } else {
+        return {
+          'success': false,
+          'message': jsonResponse['msg'] ?? 'Face not detected'
+        };
+      }
     } catch (e) {
       return {'success': false, 'message': 'Network error: ${e.toString()}'};
     }
@@ -197,6 +254,7 @@ class _FaceVerificationScreenState extends State<FaceVerificationScreen> {
 
   @override
   void dispose() {
+    _captureTimer?.cancel();
     _controller?.dispose();
     super.dispose();
   }
@@ -210,7 +268,10 @@ class _FaceVerificationScreenState extends State<FaceVerificationScreen> {
         elevation: 0,
         leading: IconButton(
           icon: const Icon(Icons.arrow_back, color: Colors.white),
-          onPressed: () => Navigator.pop(context),
+          onPressed: () {
+            _captureTimer?.cancel();
+            Navigator.pop(context);
+          },
         ),
         title: Text(
           widget.action == 'in' ? 'Entrance' : 'Exit',
@@ -237,9 +298,11 @@ class _FaceVerificationScreenState extends State<FaceVerificationScreen> {
               height: 380,
               decoration: BoxDecoration(
                 border: Border.all(
-                  color: _isProcessing
-                      ? Colors.blue.withOpacity(0.8)
-                      : Colors.white.withOpacity(0.8),
+                  color: _faceDetected
+                      ? Colors.green.withOpacity(0.9)
+                      : (_isProcessing
+                      ? Colors.blue.withOpacity(0.5)
+                      : Colors.white.withOpacity(0.8)),
                   width: 3,
                 ),
                 borderRadius: BorderRadius.circular(200),
@@ -275,7 +338,8 @@ class _FaceVerificationScreenState extends State<FaceVerificationScreen> {
             right: 20,
             child: widget.action == 'in'
                 ? TextButton(
-              onPressed: _isProcessing ? null : () async {
+              onPressed: _isProcessing || _faceDetected ? null : () async {
+                _captureTimer?.cancel();
                 await _controller?.dispose();
                 setState(() {
                   _isInitialized = false;
@@ -307,7 +371,8 @@ class _FaceVerificationScreenState extends State<FaceVerificationScreen> {
               ),
             )
                 : TextButton(
-              onPressed: _isProcessing ? null : () async {
+              onPressed: _isProcessing || _faceDetected ? null : () async {
+                _captureTimer?.cancel();
                 await _controller?.dispose();
                 setState(() {
                   _isInitialized = false;
@@ -415,27 +480,6 @@ class _FaceVerificationScreenState extends State<FaceVerificationScreen> {
           ),
         ),
       ),
-      floatingActionButton: _isInitialized && !_isProcessing
-          ? FloatingActionButton.large(
-        onPressed: _captureAndVerify,
-        backgroundColor: const Color(0xFF4CAF50),
-        child: const Icon(
-          Icons.camera_alt,
-          size: 36,
-          color: Colors.white,
-        ),
-      )
-          : _isProcessing
-          ? FloatingActionButton.large(
-        onPressed: null,
-        backgroundColor: Colors.grey,
-        child: const CircularProgressIndicator(
-          color: Colors.white,
-          strokeWidth: 3,
-        ),
-      )
-          : null,
-      floatingActionButtonLocation: FloatingActionButtonLocation.centerFloat,
     );
   }
 }
