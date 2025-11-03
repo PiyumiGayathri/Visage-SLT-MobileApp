@@ -272,39 +272,113 @@ class _FaceVerificationScreenState extends State<FaceVerificationScreen> {
   }
 
   Future<void> _sendFaceDetailsToBackend() async {
-    // You can capture a still image here if needed, or send face bounding box info
-    // For now, just call your existing API logic
+    if (!mounted || _controller == null || !_controller!.value.isInitialized) {
+      _isFaceSubmissionLocked = false;
+      _isProcessing = false;
+      return;
+    }
+
     try {
-      // Optionally, stop the stream and take a picture for higher quality
+      // Stop the stream and wait a bit longer for camera to stabilize
       if (_isStreamingStarted) {
         await _controller!.stopImageStream();
         _isStreamingStarted = false;
-        await Future.delayed(const Duration(milliseconds: 100));
+        print('Image stream stopped for face detection capture');
+        // Increased delay to let camera settle
+        await Future.delayed(const Duration(milliseconds: 300));
       }
+
+      // Check again if controller is still valid
+      if (!mounted || _controller == null || !_controller!.value.isInitialized) {
+        _isFaceSubmissionLocked = false;
+        _isProcessing = false;
+        return;
+      }
+
       final image = await _controller!.takePicture();
-      await _startImageStream();
+      print('Image captured from face detection: ${image.path}');
+
+      // Restart stream before API call
+      if (mounted && _controller != null) {
+        await _startImageStream();
+      }
+
       final result = await _verifyFaceWithUnifiedAPI(image.path);
+
+      if (!mounted) return;
+
       if (result['success'] == true) {
         setState(() {
           _frameState = 'success';
-          _statusMessage = result['sp_msg'] ?? 'Face verified!';
+          _statusMessage = (result['sp_msg']?.toString().isNotEmpty == true && result['sp_msg'] != 'None')
+              ? result['sp_msg']
+              : (result['msg2']?.toString().isNotEmpty == true ? result['msg2'] : 'Face verified!');
           _detectedEmpID = result['user'];
+          _faceDetected = true;
         });
-        // Optionally, show a success message or navigate
+
+        // Stop timer and navigate
+        _captureTimer?.cancel();
+        await Future.delayed(const Duration(milliseconds: 1500));
+
+        if (mounted) {
+          Navigator.pop(context);
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(result['msg2'] ?? 'Successfully clocked ${widget.action}! (${result['user']})'),
+              backgroundColor: Colors.green,
+              duration: const Duration(seconds: 3),
+            ),
+          );
+        }
       } else {
         setState(() {
           _frameState = 'error';
-          _statusMessage = result['message'] ?? 'Verification failed';
+          _statusMessage = (result['message']?.toString().isNotEmpty == true && result['message'] != 'None')
+              ? result['message']
+              : 'Verification failed';
           _detectedEmpID = null;
+          _faceDetected = false;
         });
+
+        // Reset to idle after showing error
+        await Future.delayed(const Duration(seconds: 3));
+        if (mounted && !_faceDetected) {
+          setState(() {
+            _frameState = 'idle';
+            _statusMessage = 'Position your face in the frame';
+          });
+        }
       }
     } catch (e) {
-      setState(() {
-        _frameState = 'error';
-        _statusMessage = 'Error sending face details: $e';
-      });
+      print('Error in _sendFaceDetailsToBackend: $e');
+      if (mounted) {
+        setState(() {
+          _frameState = 'error';
+          _statusMessage = 'Error: ${e.toString()}';
+        });
+
+        // Try to restart stream
+        try {
+          if (!_isStreamingStarted && _controller != null) {
+            await _startImageStream();
+          }
+        } catch (streamError) {
+          print('Error restarting stream: $streamError');
+        }
+
+        await Future.delayed(const Duration(seconds: 2));
+        if (mounted && !_faceDetected) {
+          setState(() {
+            _frameState = 'idle';
+            _statusMessage = 'Position your face in the frame';
+          });
+        }
+      }
+    } finally {
+      _isFaceSubmissionLocked = false;
+      _isProcessing = false;
     }
-    return;
   }
 
   Future<void> _startAutomaticCapture() async {
@@ -365,7 +439,7 @@ class _FaceVerificationScreenState extends State<FaceVerificationScreen> {
         await _controller!.stopImageStream();
         _isStreamingStarted = false;
         print('Image stream stopped for capture');
-        await Future.delayed(const Duration(milliseconds: 100));
+        await Future.delayed(const Duration(milliseconds: 300));
       }
 
       print('Taking picture...');
@@ -387,7 +461,9 @@ class _FaceVerificationScreenState extends State<FaceVerificationScreen> {
           _faceDetected = true;
           _detectedEmpID = result['user'];
           _frameState = 'success'; // Green frame
-          _statusMessage = result['sp_msg'] ?? 'Face verified!';
+          _statusMessage = (result['sp_msg']?.toString().isNotEmpty == true && result['sp_msg'] != 'None')
+              ? result['sp_msg']
+              : (result['msg2']?.toString().isNotEmpty == true ? result['msg2'] : 'Face verified!');
         });
 
         // Stop the timer
@@ -415,7 +491,9 @@ class _FaceVerificationScreenState extends State<FaceVerificationScreen> {
           _detectedEmpID = null;
           _isProcessing = false;
           _frameState = 'error'; // Red frame
-          _statusMessage = result['message'] ?? 'Verification failed';
+          _statusMessage = (result['message']?.toString().isNotEmpty == true && result['message'] != 'None')
+              ? result['message']
+              : 'Verification failed';
         });
 
         // Reset to idle state after 3 seconds
