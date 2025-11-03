@@ -5,6 +5,9 @@ import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'package:permission_handler/permission_handler.dart';
 import 'dart:async';
+import 'package:geolocator/geolocator.dart';
+import 'package:google_mlkit_face_detection/google_mlkit_face_detection.dart';
+import 'dart:typed_data';
 
 class FaceVerificationScreen extends StatefulWidget {
   final String action; // 'in' or 'out'
@@ -23,18 +26,98 @@ class _FaceVerificationScreenState extends State<FaceVerificationScreen> {
   List<CameraDescription>? _cameras;
   bool _isInitialized = false;
   bool _isProcessing = false;
-  String _statusMessage = 'Requesting camera permission...';
+  String _statusMessage = 'Requesting permissions...';
   Timer? _captureTimer;
   bool _faceDetected = false;
   String? _detectedEmpID;
+  Position? _currentPosition;
+  FaceDetector? _faceDetector;
+  bool _isFaceSubmissionLocked = false;
+
+  // Frame state: 'idle', 'scanning', 'success', 'error'
+  String _frameState = 'idle';
+
+  // Track if image stream is active
+  bool _isStreamingStarted = false;
 
   @override
   void initState() {
     super.initState();
-    _initializeCamera();
+    _faceDetector = FaceDetector(
+      options: FaceDetectorOptions(
+        enableContours: false,
+        enableLandmarks: false,
+        performanceMode: FaceDetectorMode.fast,
+      ),
+    );
+    _initializeApp();
+  }
+
+  @override
+  void dispose() {
+    _faceDetector?.close();
+    _controller?.dispose();
+    _captureTimer?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _initializeApp() async {
+    // First get location permission and current position
+    await _getCurrentLocation();
+
+    // Then initialize camera
+    if (_currentPosition != null) {
+      await _initializeCamera();
+    }
+  }
+
+  Future<void> _getCurrentLocation() async {
+    setState(() {
+      _statusMessage = 'Requesting location permission...';
+    });
+
+    // Check location permission
+    LocationPermission permission = await Geolocator.checkPermission();
+    if (permission == LocationPermission.denied) {
+      permission = await Geolocator.requestPermission();
+      if (permission == LocationPermission.denied) {
+        setState(() {
+          _statusMessage = 'Location permission denied. Please enable it to continue.';
+        });
+        return;
+      }
+    }
+
+    if (permission == LocationPermission.deniedForever) {
+      setState(() {
+        _statusMessage = 'Location permission permanently denied. Please enable in settings.';
+      });
+      return;
+    }
+
+    // Get current position
+    try {
+      setState(() {
+        _statusMessage = 'Getting your location...';
+      });
+
+      _currentPosition = await Geolocator.getCurrentPosition(
+        desiredAccuracy: LocationAccuracy.high,
+      );
+
+      print('Current location: ${_currentPosition!.latitude}, ${_currentPosition!.longitude}');
+    } catch (e) {
+      setState(() {
+        _statusMessage = 'Failed to get location: ${e.toString()}';
+      });
+    }
   }
 
   Future<void> _initializeCamera() async {
+    setState(() {
+      _statusMessage = 'Requesting camera permission...';
+    });
+
     // Request camera permission
     final status = await Permission.camera.request();
 
@@ -72,191 +155,401 @@ class _FaceVerificationScreenState extends State<FaceVerificationScreen> {
         frontCamera,
         ResolutionPreset.medium,
         enableAudio: false,
+        imageFormatGroup: ImageFormatGroup.yuv420, // Use YUV420 for streaming
       );
 
       await _controller!.initialize();
+      print('Camera initialized successfully');
+
+      // Start image stream to ensure camera is actively streaming
+      await _startImageStream();
+
+      // Additional delay to ensure streaming is fully active
+      await Future.delayed(const Duration(milliseconds: 1500));
 
       if (mounted) {
         setState(() {
           _isInitialized = true;
+          _frameState = 'idle';
           _statusMessage = 'Position your face in the frame';
         });
         _startAutomaticCapture();
       }
     } catch (e) {
+      print('Camera initialization error: $e');
       setState(() {
         _statusMessage = 'Camera error: ${e.toString()}';
       });
     }
   }
 
-  void _startAutomaticCapture() {
+  Future<void> _startImageStream() async {
+    if (_controller == null || !_controller!.value.isInitialized) {
+      print('Cannot start image stream - controller not ready');
+      return;
+    }
+    try {
+      await _controller!.startImageStream((CameraImage image) async {
+        if (!_isStreamingStarted) {
+          _isStreamingStarted = true;
+          print('Image stream started successfully');
+        }
+        if (_isProcessing || _isFaceSubmissionLocked) return;
+        _isProcessing = true;
+        try {
+          // Convert CameraImage to InputImage (Android only, YUV420 format)
+          if (image.format.group != ImageFormatGroup.yuv420) {
+            print('Unsupported image format for ML Kit');
+            _isProcessing = false;
+            return;
+          }
+          // Concatenate all planes' bytes
+          final int totalBytes = image.planes.fold(0, (sum, plane) => sum + plane.bytes.length);
+          final Uint8List bytes = Uint8List(totalBytes);
+          int offset = 0;
+          for (final Plane plane in image.planes) {
+            bytes.setRange(offset, offset + plane.bytes.length, plane.bytes);
+            offset += plane.bytes.length;
+          }
+          final Size imageSize = Size(image.width.toDouble(), image.height.toDouble());
+          final camera = _controller!.description;
+          final rotation = _rotationIntToImageRotation(camera.sensorOrientation);
+          final inputImage = InputImage.fromBytes(
+            bytes: bytes,
+            metadata: InputImageMetadata(
+              size: imageSize,
+              rotation: rotation,
+              format: InputImageFormat.yuv420,
+              bytesPerRow: image.planes[0].bytesPerRow,
+            ),
+          );
+          final faces = await _faceDetector!.processImage(inputImage);
+          if (faces.isNotEmpty) {
+            print('Face detected! Sending to backend...');
+            _isFaceSubmissionLocked = true;
+            _faceDetected = true;
+            setState(() {
+              _frameState = 'scanning';
+              _statusMessage = 'Face detected! Sending for verification...';
+            });
+            await _sendFaceDetailsToBackend();
+            await Future.delayed(const Duration(seconds: 5));
+            _isFaceSubmissionLocked = false;
+            _isProcessing = false;
+            return;
+          } else {
+            _faceDetected = false;
+            _isProcessing = false;
+            return;
+          }
+        } catch (e) {
+          print('Face detection error: $e');
+          _isProcessing = false;
+          return;
+        }
+      });
+      print('Called startImageStream');
+    } catch (e) {
+      print('Error starting image stream: $e');
+      return;
+    }
+    return;
+  }
+
+  InputImageRotation _rotationIntToImageRotation(int rotation) {
+    switch (rotation) {
+      case 0:
+        return InputImageRotation.rotation0deg;
+      case 90:
+        return InputImageRotation.rotation90deg;
+      case 180:
+        return InputImageRotation.rotation180deg;
+      case 270:
+        return InputImageRotation.rotation270deg;
+      default:
+        return InputImageRotation.rotation0deg;
+    }
+  }
+
+  Future<void> _sendFaceDetailsToBackend() async {
+    // You can capture a still image here if needed, or send face bounding box info
+    // For now, just call your existing API logic
+    try {
+      // Optionally, stop the stream and take a picture for higher quality
+      if (_isStreamingStarted) {
+        await _controller!.stopImageStream();
+        _isStreamingStarted = false;
+        await Future.delayed(const Duration(milliseconds: 100));
+      }
+      final image = await _controller!.takePicture();
+      await _startImageStream();
+      final result = await _verifyFaceWithUnifiedAPI(image.path);
+      if (result['success'] == true) {
+        setState(() {
+          _frameState = 'success';
+          _statusMessage = result['sp_msg'] ?? 'Face verified!';
+          _detectedEmpID = result['user'];
+        });
+        // Optionally, show a success message or navigate
+      } else {
+        setState(() {
+          _frameState = 'error';
+          _statusMessage = result['message'] ?? 'Verification failed';
+          _detectedEmpID = null;
+        });
+      }
+    } catch (e) {
+      setState(() {
+        _frameState = 'error';
+        _statusMessage = 'Error sending face details: $e';
+      });
+    }
+    return;
+  }
+
+  Future<void> _startAutomaticCapture() async {
+    print('Starting automatic capture timer');
     _captureTimer = Timer.periodic(const Duration(seconds: 2), (timer) {
-      if (_isInitialized && !_isProcessing && mounted) {
+      print('Timer tick - isInitialized: $_isInitialized, isProcessing: $_isProcessing, faceDetected: $_faceDetected, isStreaming: $_isStreamingStarted');
+      if (_isInitialized && !_isProcessing && mounted && !_faceDetected && _isStreamingStarted) {
+        print('Calling _captureAndVerifyAutomatic');
         _captureAndVerifyAutomatic();
       }
     });
+    return;
   }
 
   Future<void> _captureAndVerifyAutomatic() async {
-    if (_controller == null || !_controller!.value.isInitialized || _isProcessing) {
+    print('_captureAndVerifyAutomatic called');
+
+    if (_controller == null) {
+      print('Controller is null');
       return;
     }
 
+    if (!_controller!.value.isInitialized) {
+      print('Controller not initialized');
+      return;
+    }
+
+    if (!_isStreamingStarted) {
+      print('Camera not streaming images (checked in _captureAndVerifyAutomatic)');
+      return;
+    }
+
+    if (_isProcessing) {
+      print('Already processing');
+      return;
+    }
+
+    if (_currentPosition == null) {
+      print('Location not available');
+      setState(() {
+        _statusMessage = 'Getting location...';
+      });
+      await _getCurrentLocation();
+      return;
+    }
+
+    print('Starting capture process');
+
     setState(() {
       _isProcessing = true;
+      _frameState = 'scanning'; // Blue frame
+      _statusMessage = 'Scanning...';
     });
 
     try {
-      final image = await _controller!.takePicture();
-      final result = await _verifyFaceWithBackend(image.path);
+      // Stop image stream temporarily for capture
+      if (_isStreamingStarted) {
+        await _controller!.stopImageStream();
+        _isStreamingStarted = false;
+        print('Image stream stopped for capture');
+        await Future.delayed(const Duration(milliseconds: 100));
+      }
 
-      if (result['success'] == true && result['user'] != null) {
-        // Face detected!
+      print('Taking picture...');
+      final image = await _controller!.takePicture();
+      print('Image captured successfully: ${image.path}');
+
+      // Restart image stream
+      await _startImageStream();
+
+      print('Calling unified API...');
+      final result = await _verifyFaceWithUnifiedAPI(image.path);
+      print('API Response received');
+      print('Verification result: $result');
+
+      if (result['success'] == true) {
+        print('Verification successful! User: ${result['user']}');
+
         setState(() {
           _faceDetected = true;
           _detectedEmpID = result['user'];
-          _statusMessage = 'Face verified! Marking attendance...';
+          _frameState = 'success'; // Green frame
+          _statusMessage = result['sp_msg'] ?? 'Face verified!';
         });
 
         // Stop the timer
         _captureTimer?.cancel();
 
-        // Automatically mark attendance
-        await _markAttendance(result['user']);
-      } else {
-        // Face not detected
-        setState(() {
-          _faceDetected = false;
-          _detectedEmpID = null;
-          _statusMessage = result['message'] ?? 'Position your face in the frame';
-        });
-      }
-    } catch (e) {
-      setState(() {
-        _faceDetected = false;
-        _statusMessage = 'Scanning...';
-      });
-    } finally {
-      setState(() {
-        _isProcessing = false;
-      });
-    }
-  }
+        // Wait a moment to show the success message
+        await Future.delayed(const Duration(milliseconds: 1500));
 
-  Future<void> _markAttendance(String empID) async {
-    const apiUrl = 'https://ientrada.raccoon-ai.io/api/mark_atendance';
-
-    try {
-      final response = await http.post(
-        Uri.parse(apiUrl),
-        headers: {
-          'Content-Type': 'application/x-www-form-urlencoded',
-        },
-        body: {
-          'api': 'NsHPq832MX',
-          'user': 'FaceAccuracyTesting',
-          'other': widget.action == 'in' ? 'I' : 'O',
-          'empID': empID,
-          'detpoint': 'test_group',
-        },
-      );
-
-      if (response.statusCode == 200) {
+        // Navigate back with success
         if (mounted) {
           Navigator.pop(context);
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
-              content: Text('Successfully clocked ${widget.action}!'),
+              content: Text(result['msg2'] ?? 'Successfully clocked ${widget.action}! (${result['user']})'),
               backgroundColor: Colors.green,
-              duration: const Duration(seconds: 2),
+              duration: const Duration(seconds: 3),
             ),
           );
         }
       } else {
+        // Verification failed
+        print('Verification failed. Message: ${result['message']}');
         setState(() {
-          _statusMessage = 'Attendance marking failed. Please try again.';
           _faceDetected = false;
+          _detectedEmpID = null;
+          _isProcessing = false;
+          _frameState = 'error'; // Red frame
+          _statusMessage = result['message'] ?? 'Verification failed';
         });
-        _startAutomaticCapture(); // Restart scanning
+
+        // Reset to idle state after 3 seconds
+        Future.delayed(const Duration(seconds: 3), () {
+          if (mounted && !_faceDetected) {
+            setState(() {
+              _frameState = 'idle';
+              _statusMessage = 'Position your face in the frame';
+            });
+          }
+        });
       }
-    } catch (e) {
+    } catch (e, stackTrace) {
+      print('ERROR in capture: $e');
+      print('Stack trace: $stackTrace');
+
+      // Try to restart image stream
+      try {
+        if (!_isStreamingStarted) {
+          await _startImageStream();
+        }
+      } catch (streamError) {
+        print('Error restarting stream: $streamError');
+      }
+
       setState(() {
-        _statusMessage = 'Network error. Please try again.';
         _faceDetected = false;
+        _isProcessing = false;
+        _frameState = 'error'; // Red frame
+        _statusMessage = 'Error: ${e.toString()}';
       });
-      _startAutomaticCapture(); // Restart scanning
+
+      // Reset to idle state after 2 seconds
+      Future.delayed(const Duration(seconds: 2), () {
+        if (mounted && !_faceDetected) {
+          setState(() {
+            _frameState = 'idle';
+            _statusMessage = 'Position your face in the frame';
+          });
+        }
+      });
     }
   }
 
-  void _showSettingsDialog() {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: const Color(0xFF1e2a3a),
-        title: const Text(
-          'Camera Permission Required',
-          style: TextStyle(color: Colors.white),
-        ),
-        content: const Text(
-          'Camera access is required for face verification. Please enable it in app settings.',
-          style: TextStyle(color: Colors.white70),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () {
-              Navigator.pop(context);
-              Navigator.pop(context);
-            },
-            child: const Text('Cancel', style: TextStyle(color: Colors.white70)),
-          ),
-          TextButton(
-            onPressed: () {
-              openAppSettings();
-              Navigator.pop(context);
-            },
-            child: const Text('Open Settings', style: TextStyle(color: Color(0xFF4CAF50))),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Future<Map<String, dynamic>> _verifyFaceWithBackend(String imagePath) async {
-    const apiUrl = 'https://ientrada.raccoon-ai.io/api/face_verification';
+  Future<Map<String, dynamic>> _verifyFaceWithUnifiedAPI(String imagePath) async {
+    const apiUrl = 'https://ientrada.raccoon-ai.io/api/verify_face';
 
     try {
+      print('Sending request to: $apiUrl');
+
       var request = http.MultipartRequest('POST', Uri.parse(apiUrl));
+
+      // Add headers
       request.headers['api'] = 'NsHPq832MX';
       request.headers['user'] = 'FaceAccuracyTesting';
-      request.files.add(await http.MultipartFile.fromPath('image', imagePath));
+      request.headers['other'] = widget.action == 'in' ? 'I' : 'O';
+      request.headers['userlat'] = _currentPosition!.latitude.toString();
+      request.headers['userlon'] = _currentPosition!.longitude.toString();
 
-      var response = await request.send();
-      var responseData = await response.stream.bytesToString();
-      var jsonResponse = json.decode(responseData);
+      // Add image file
+      var imageFile = await http.MultipartFile.fromPath('image', imagePath);
+      request.files.add(imageFile);
 
-      if (jsonResponse['msg'] == 'Verification Success.') {
+      print('Request headers: ${request.headers}');
+      print('Sending image: $imagePath');
+      print('Location: ${_currentPosition!.latitude}, ${_currentPosition!.longitude}');
+
+      // Send request with timeout
+      var streamedResponse = await request.send().timeout(
+        const Duration(seconds: 15),
+        onTimeout: () {
+          throw TimeoutException('Request timed out');
+        },
+      );
+
+      print('Response status code: ${streamedResponse.statusCode}');
+
+      var responseData = await streamedResponse.stream.bytesToString();
+      print('Response body: $responseData');
+
+      if (streamedResponse.statusCode == 200) {
+        var jsonResponse = json.decode(responseData);
+
+        // Check if verification was successful
+        if (jsonResponse['msg'] != null &&
+            jsonResponse['msg'].toString().toLowerCase().contains('success')) {
+          return {
+            'success': true,
+            'user': jsonResponse['user'],
+            'msg2': jsonResponse['msg2'], // Attendance message
+            'sp_msg': jsonResponse['sp_msg'], // Special message
+            'message': jsonResponse['msg']
+          };
+        } else {
+          // Failed verification (location, spoof, not found, etc.)
+          return {
+            'success': false,
+            'message': jsonResponse['msg'] ?? 'Verification failed'
+          };
+        }
+      } else if (streamedResponse.statusCode == 400) {
+        // Bad request (spoof detected, user not found, etc.)
+        var jsonResponse = json.decode(responseData);
         return {
-          'success': true,
-          'user': jsonResponse['user'],
-          'message': 'Face verified!'
+          'success': false,
+          'message': jsonResponse['msg'] ?? 'Verification failed'
         };
       } else {
         return {
           'success': false,
-          'message': jsonResponse['msg'] ?? 'Face not detected'
+          'message': 'Server error: ${streamedResponse.statusCode}'
         };
       }
+    } on TimeoutException catch (e) {
+      print('Timeout error: $e');
+      return {'success': false, 'message': 'Request timed out'};
     } catch (e) {
+      print('Network error: $e');
       return {'success': false, 'message': 'Network error: ${e.toString()}'};
     }
   }
 
-  @override
-  void dispose() {
-    _captureTimer?.cancel();
-    _controller?.dispose();
-    super.dispose();
+  Color _getFrameColor() {
+    switch (_frameState) {
+      case 'scanning':
+        return Colors.blue.withOpacity(0.9);
+      case 'success':
+        return Colors.green.withOpacity(0.9);
+      case 'error':
+        return Colors.red.withOpacity(0.9);
+      case 'idle':
+      default:
+        return Colors.white.withOpacity(0.8);
+    }
   }
 
   @override
@@ -289,26 +582,94 @@ class _FaceVerificationScreenState extends State<FaceVerificationScreen> {
           Positioned.fill(
             child: CameraPreview(_controller!),
           ),
-          // Face frame overlay
+          // Face frame overlay with animated color
           Positioned(
             top: MediaQuery.of(context).size.height * 0.2,
             left: MediaQuery.of(context).size.width * 0.5 - 140,
-            child: Container(
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 300),
               width: 280,
               height: 380,
               decoration: BoxDecoration(
                 border: Border.all(
-                  color: _faceDetected
-                      ? Colors.green.withOpacity(0.9)
-                      : (_isProcessing
-                      ? Colors.blue.withOpacity(0.5)
-                      : Colors.white.withOpacity(0.8)),
+                  color: _getFrameColor(),
                   width: 3,
                 ),
                 borderRadius: BorderRadius.circular(200),
+                boxShadow: [
+                  BoxShadow(
+                    color: _getFrameColor().withOpacity(0.5),
+                    blurRadius: 20,
+                    spreadRadius: 2,
+                  ),
+                ],
               ),
             ),
           ),
+          // Status indicator icon
+          if (_frameState == 'scanning')
+            Positioned(
+              top: MediaQuery.of(context).size.height * 0.2 - 40,
+              left: 0,
+              right: 0,
+              child: Center(
+                child: Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.blue.withOpacity(0.9),
+                    shape: BoxShape.circle,
+                  ),
+                  child: const SizedBox(
+                    width: 24,
+                    height: 24,
+                    child: CircularProgressIndicator(
+                      color: Colors.white,
+                      strokeWidth: 3,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          if (_frameState == 'success')
+            Positioned(
+              top: MediaQuery.of(context).size.height * 0.2 - 40,
+              left: 0,
+              right: 0,
+              child: Center(
+                child: Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.green.withOpacity(0.9),
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(
+                    Icons.check,
+                    color: Colors.white,
+                    size: 32,
+                  ),
+                ),
+              ),
+            ),
+          if (_frameState == 'error')
+            Positioned(
+              top: MediaQuery.of(context).size.height * 0.2 - 40,
+              left: 0,
+              right: 0,
+              child: Center(
+                child: Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.red.withOpacity(0.9),
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(
+                    Icons.close,
+                    color: Colors.white,
+                    size: 32,
+                  ),
+                ),
+              ),
+            ),
           // Bottom instruction
           Positioned(
             bottom: 160,
@@ -338,12 +699,18 @@ class _FaceVerificationScreenState extends State<FaceVerificationScreen> {
             right: 20,
             child: widget.action == 'in'
                 ? TextButton(
-              onPressed: _isProcessing || _faceDetected ? null : () async {
+              onPressed: _isProcessing || _faceDetected
+                  ? null
+                  : () async {
                 _captureTimer?.cancel();
+                if (_isStreamingStarted) {
+                  await _controller?.stopImageStream();
+                }
                 await _controller?.dispose();
                 setState(() {
                   _isInitialized = false;
-                  _statusMessage = 'Requesting camera permission...';
+                  _isStreamingStarted = false;
+                  _statusMessage = 'Requesting permissions...';
                 });
                 if (mounted) {
                   Navigator.pushReplacement(
@@ -371,12 +738,18 @@ class _FaceVerificationScreenState extends State<FaceVerificationScreen> {
               ),
             )
                 : TextButton(
-              onPressed: _isProcessing || _faceDetected ? null : () async {
+              onPressed: _isProcessing || _faceDetected
+                  ? null
+                  : () async {
                 _captureTimer?.cancel();
+                if (_isStreamingStarted) {
+                  await _controller?.stopImageStream();
+                }
                 await _controller?.dispose();
                 setState(() {
                   _isInitialized = false;
-                  _statusMessage = 'Requesting camera permission...';
+                  _isStreamingStarted = false;
+                  _statusMessage = 'Requesting permissions...';
                 });
                 if (mounted) {
                   Navigator.pushReplacement(
@@ -458,9 +831,9 @@ class _FaceVerificationScreenState extends State<FaceVerificationScreen> {
                 ElevatedButton.icon(
                   onPressed: () {
                     setState(() {
-                      _statusMessage = 'Requesting camera permission...';
+                      _statusMessage = 'Requesting permissions...';
                     });
-                    _initializeCamera();
+                    _initializeApp();
                   },
                   icon: const Icon(Icons.camera_alt),
                   label: const Text('Grant Permission'),
@@ -483,3 +856,4 @@ class _FaceVerificationScreenState extends State<FaceVerificationScreen> {
     );
   }
 }
+
