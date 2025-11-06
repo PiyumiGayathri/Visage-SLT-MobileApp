@@ -662,18 +662,23 @@ class _FaceVerificationScreenState extends State<FaceVerificationScreen> {
           ),
           // Face frame overlay with animated color
           Positioned(
-            top: MediaQuery.of(context).size.height * 0.2,
-            left: MediaQuery.of(context).size.width * 0.5 - 140,
+            left: MediaQuery.of(context).size.width * 0.5 - 130,
+            top: MediaQuery.of(context).size.height * 0.18,
             child: AnimatedContainer(
               duration: const Duration(milliseconds: 300),
-              width: 280,
-              height: 380,
+              width: 260,
+              height: 340,
               decoration: BoxDecoration(
                 border: Border.all(
                   color: _getFrameColor(),
-                  width: 3,
+                  width: 6, // CHANGED - thicker border (was 3)
                 ),
-                borderRadius: BorderRadius.circular(200),
+                borderRadius: BorderRadius.only(
+                  topLeft: Radius.circular(130), // CHANGED - rounded top
+                  topRight: Radius.circular(130), // CHANGED - rounded top
+                  bottomLeft: Radius.circular(90), // CHANGED - less rounded bottom
+                  bottomRight: Radius.circular(90), // CHANGED - less rounded bottom
+                ),
                 boxShadow: [
                   BoxShadow(
                     color: _getFrameColor().withOpacity(0.5),
