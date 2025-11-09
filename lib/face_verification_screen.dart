@@ -634,22 +634,29 @@ class _FaceVerificationScreenState extends State<FaceVerificationScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Colors.black,
+      extendBodyBehindAppBar: true,
       appBar: AppBar(
         backgroundColor: Colors.transparent,
         elevation: 0,
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back, color: Colors.white),
-          onPressed: () {
-            _captureTimer?.cancel();
-            Navigator.pop(context);
-          },
+        leading: Padding(
+          padding: const EdgeInsets.only(top: 8.0),
+          child: IconButton(
+            icon: const Icon(Icons.arrow_back, color: Colors.white, size: 28),
+            onPressed: () {
+              _captureTimer?.cancel();
+              Navigator.pop(context);
+            },
+          ),
         ),
-        title: Text(
-          widget.action == 'in' ? 'Entrance' : 'Exit',
-          style: const TextStyle(
-            color: Colors.white,
-            fontSize: 20,
-            fontWeight: FontWeight.w600,
+        title: Padding(
+          padding: const EdgeInsets.only(top: 8.0),
+          child: Text(
+            widget.action == 'in' ? 'Entrance' : 'Exit',
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 20,
+              fontWeight: FontWeight.w600,
+            ),
           ),
         ),
       ),
@@ -662,18 +669,23 @@ class _FaceVerificationScreenState extends State<FaceVerificationScreen> {
           ),
           // Face frame overlay with animated color
           Positioned(
-            top: MediaQuery.of(context).size.height * 0.2,
-            left: MediaQuery.of(context).size.width * 0.5 - 140,
+            left: MediaQuery.of(context).size.width * 0.5 - 130,
+            top: MediaQuery.of(context).size.height * 0.18,
             child: AnimatedContainer(
               duration: const Duration(milliseconds: 300),
-              width: 280,
-              height: 380,
+              width: 260,
+              height: 340,
               decoration: BoxDecoration(
                 border: Border.all(
                   color: _getFrameColor(),
-                  width: 3,
+                  width: 6, // CHANGED - thicker border (was 3)
                 ),
-                borderRadius: BorderRadius.circular(200),
+                borderRadius: BorderRadius.only(
+                  topLeft: Radius.circular(130), // CHANGED - rounded top
+                  topRight: Radius.circular(130), // CHANGED - rounded top
+                  bottomLeft: Radius.circular(90), // CHANGED - less rounded bottom
+                  bottomRight: Radius.circular(90), // CHANGED - less rounded bottom
+                ),
                 boxShadow: [
                   BoxShadow(
                     color: _getFrameColor().withOpacity(0.5),
