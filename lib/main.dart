@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'location_verified_screen.dart';
-import 'developer_mode_warning_screen.dart';
 import 'package:safe_device/safe_device.dart';
 import 'services/kiosk_mode_service.dart';
 import 'widgets/exit_kiosk_dialog.dart';
@@ -39,13 +38,11 @@ class DeveloperModeChecker extends StatefulWidget {
 
 class _DeveloperModeCheckerState extends State<DeveloperModeChecker> {
   bool _isChecking = true;
-  bool _developerModeEnabled = false;
   bool _kioskModeActive = false;
 
   @override
   void initState() {
     super.initState();
-    _checkDeveloperMode();
     _initializeKioskMode();
   }
 
@@ -55,6 +52,7 @@ class _DeveloperModeCheckerState extends State<DeveloperModeChecker> {
     if (mounted) {
       setState(() {
         _kioskModeActive = success;
+        _isChecking = false;
       });
     }
 
@@ -62,26 +60,6 @@ class _DeveloperModeCheckerState extends State<DeveloperModeChecker> {
     await KioskModeService.enableImmersiveMode();
   }
 
-  Future<void> _checkDeveloperMode() async {
-    try {
-      bool developerMode = await SafeDevice.isDevelopmentModeEnable;
-
-      if (mounted) {
-        setState(() {
-          _developerModeEnabled = developerMode;
-          _isChecking = false;
-        });
-      }
-    } catch (e) {
-      // If detection fails, allow app to continue
-      if (mounted) {
-        setState(() {
-          _developerModeEnabled = false;
-          _isChecking = false;
-        });
-      }
-    }
-  }
 
   Future<void> _handleExitRequest() async {
     // Show password dialog
@@ -125,10 +103,7 @@ class _DeveloperModeCheckerState extends State<DeveloperModeChecker> {
         body: Stack(
           children: [
             // Main content
-            if (_developerModeEnabled)
-              const DeveloperModeWarningScreen()
-            else
-              const LocationVerifiedScreen(),
+            const LocationVerifiedScreen(),
 
             // Floating exit button (top-right corner)
             Positioned(

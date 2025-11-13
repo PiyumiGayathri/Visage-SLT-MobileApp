@@ -8,6 +8,7 @@ import 'dart:async';
 import 'package:geolocator/geolocator.dart';
 import 'package:google_mlkit_face_detection/google_mlkit_face_detection.dart';
 import 'dart:typed_data';
+import 'dart:ui' as ui;
 
 class FaceVerificationScreen extends StatefulWidget {
   final String action; // 'in' or 'out'
@@ -663,37 +664,34 @@ class _FaceVerificationScreenState extends State<FaceVerificationScreen> {
       body: _isInitialized
           ? Stack(
         children: [
-          // Camera preview
+          // Camera preview - full screen
           Positioned.fill(
-            child: CameraPreview(_controller!),
-          ),
-          // Face frame overlay with animated color
-          Positioned(
-            left: MediaQuery.of(context).size.width * 0.5 - 130,
-            top: MediaQuery.of(context).size.height * 0.18,
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 300),
-              width: 260,
-              height: 340,
-              decoration: BoxDecoration(
-                border: Border.all(
-                  color: _getFrameColor(),
-                  width: 6, // CHANGED - thicker border (was 3)
-                ),
-                borderRadius: BorderRadius.only(
-                  topLeft: Radius.circular(130), // CHANGED - rounded top
-                  topRight: Radius.circular(130), // CHANGED - rounded top
-                  bottomLeft: Radius.circular(90), // CHANGED - less rounded bottom
-                  bottomRight: Radius.circular(90), // CHANGED - less rounded bottom
-                ),
-                boxShadow: [
-                  BoxShadow(
-                    color: _getFrameColor().withOpacity(0.5),
-                    blurRadius: 20,
-                    spreadRadius: 2,
-                  ),
-                ],
+            child: FittedBox(
+              fit: BoxFit.cover,
+              child: SizedBox(
+                width: _controller!.value.previewSize!.height,
+                height: _controller!.value.previewSize!.width,
+                child: CameraPreview(_controller!),
               ),
+            ),
+          ),
+          // Face frame overlay with dimmed background and cutout
+          AnimatedSwitcher(
+            duration: const Duration(milliseconds: 300),
+            child: CustomPaint(
+              key: ValueKey(_frameState),
+              painter: FaceOverlayPainter(
+                topCornerRadius: 40.0,
+                bottomChamfer: 50.0,
+                holeSize: Size(
+                  MediaQuery.of(context).size.width * 0.7,
+                  MediaQuery.of(context).size.width * 0.7 * 1.25,
+                ),
+                borderColor: _getFrameColor(),
+                borderWidth: 6.0,
+                overlayColor: Colors.black.withOpacity(0.6),
+              ),
+              child: Container(),
             ),
           ),
           // Status indicator icon
@@ -947,3 +945,154 @@ class _FaceVerificationScreenState extends State<FaceVerificationScreen> {
   }
 }
 
+/// A CustomClipper that creates the desired shape.
+/// This shape has rounded top corners and chamfered bottom corners.
+class ShapeClipper extends CustomClipper<Path> {
+  final double topCornerRadius;
+  final double bottomChamfer;
+
+  ShapeClipper({
+    required this.topCornerRadius,
+    required this.bottomChamfer,
+  });
+
+  @override
+  Path getClip(Size size) {
+    final Path path = Path();
+    final double w = size.width;
+    final double h = size.height;
+
+    // Ensure radii and chamfers are not larger than half the width/height
+    final double r = topCornerRadius > w / 2 ? w / 2 : topCornerRadius;
+    final double c = bottomChamfer > w / 2 ? w / 2 : bottomChamfer;
+
+    // Start at the top-left, just after the curve
+    path.moveTo(0, r);
+
+    // Top-left rounded corner
+    // We use arcToPoint for a simpler way to draw the arc
+    path.arcToPoint(
+      Offset(r, 0),
+      radius: Radius.circular(r),
+      clockwise: true,
+    );
+
+    // Top edge
+    path.lineTo(w - r, 0);
+
+    // Top-right rounded corner
+    path.arcToPoint(
+      Offset(w, r),
+      radius: Radius.circular(r),
+      clockwise: true,
+    );
+
+    // Right edge
+    path.lineTo(w, h - c);
+
+    // Bottom-right chamfer
+    path.lineTo(w - c, h);
+
+    // Bottom edge
+    path.lineTo(c, h);
+
+    // Bottom-left chamfer
+    path.lineTo(0, h - c);
+
+    // Left edge (implicitly closed)
+    path.close();
+
+    return path;
+  }
+
+  @override
+  bool shouldReclip(covariant CustomClipper<Path> oldClipper) {
+    // Reclip if the parameters change
+    if (oldClipper is ShapeClipper) {
+      return oldClipper.topCornerRadius != topCornerRadius ||
+          oldClipper.bottomChamfer != bottomChamfer;
+    }
+    return true;
+  }
+}
+
+/// A CustomPainter that creates a full-screen overlay with a cutout hole for the face.
+class FaceOverlayPainter extends CustomPainter {
+  final double topCornerRadius;
+  final double bottomChamfer;
+  final Size holeSize; // The width and height of the face cut-out
+  final Color borderColor;
+  final double borderWidth;
+  final Color overlayColor;
+
+  FaceOverlayPainter({
+    required this.topCornerRadius,
+    required this.bottomChamfer,
+    required this.holeSize,
+    this.borderColor = Colors.blue,
+    this.borderWidth = 3.0,
+    this.overlayColor = const Color.fromRGBO(0, 0, 0, 0.5),
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    // --- Define the paints ---
+    final Paint overlayPaint = Paint()..color = overlayColor;
+
+    final Paint borderPaint = Paint()
+      ..color = borderColor
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = borderWidth;
+
+    // --- Calculate the hole's position ---
+    // This will center the hole in the screen
+    final double left = (size.width - holeSize.width) / 2;
+    // A bit higher than true center (80% of the way to the top)
+    final double top = (size.height - holeSize.height) / 2 * 0.8;
+
+    // --- Define the paths ---
+
+    // This is the path for the full-screen rectangle
+    final Path outerPath = Path()
+      ..addRect(Rect.fromLTWH(0, 0, size.width, size.height));
+
+    // This is the path for the "hole", using your ShapeClipper
+    // We create the path for the hole's size...
+    final Path holePath = ShapeClipper(
+      topCornerRadius: topCornerRadius,
+      bottomChamfer: bottomChamfer,
+    ).getClip(holeSize);
+
+    // ...and then we move it to the center of the screen
+    final Path centeredHolePath = holePath.shift(Offset(left, top));
+
+    // --- Combine the paths ---
+    // This creates a new path that is the (outerPath - centeredHolePath)
+    final Path overlayPath = Path.combine(
+      PathOperation.difference,
+      outerPath,
+      centeredHolePath,
+    );
+
+    // --- Draw on canvas ---
+    // 1. Draw the semi-transparent overlay
+    canvas.drawPath(overlayPath, overlayPaint);
+
+    // 2. Draw the border *around* the hole
+    canvas.drawPath(centeredHolePath, borderPaint);
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) {
+    // Repaint if any properties change
+    if (oldDelegate is FaceOverlayPainter) {
+      return oldDelegate.topCornerRadius != topCornerRadius ||
+          oldDelegate.bottomChamfer != bottomChamfer ||
+          oldDelegate.holeSize != holeSize ||
+          oldDelegate.borderColor != borderColor ||
+          oldDelegate.borderWidth != borderWidth ||
+          oldDelegate.overlayColor != overlayColor;
+    }
+    return true;
+  }
+}
