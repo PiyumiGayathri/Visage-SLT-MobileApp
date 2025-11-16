@@ -681,8 +681,8 @@ class _FaceVerificationScreenState extends State<FaceVerificationScreen> {
             child: CustomPaint(
               key: ValueKey(_frameState),
               painter: FaceOverlayPainter(
-                topCornerRadius: 100.0,    // Large rounded top corners
-                bottomChamfer: 70.0,      // Very aggressive inward-curving bottom corners (140px radius)
+                topCornerRadius: 40.0,
+                bottomChamfer: 50.0,
                 holeSize: Size(
                   MediaQuery.of(context).size.width * 0.7,
                   MediaQuery.of(context).size.width * 0.7 * 1.25,
@@ -946,7 +946,7 @@ class _FaceVerificationScreenState extends State<FaceVerificationScreen> {
 }
 
 /// A CustomClipper that creates the desired shape.
-/// This shape has large rounded top corners and small chamfered bottom corners.
+/// This shape has rounded top corners and chamfered bottom corners.
 class ShapeClipper extends CustomClipper<Path> {
   final double topCornerRadius;
   final double bottomChamfer;
@@ -962,55 +962,44 @@ class ShapeClipper extends CustomClipper<Path> {
     final double w = size.width;
     final double h = size.height;
 
-    // Ensure radii are not larger than half the width/height
-    final double topRadius = topCornerRadius > w / 2 ? w / 2 : topCornerRadius;
-
-    // Bottom corners curve MUCH more aggressively inward
-    // Using an even larger radius and making it curve higher into the shape
-    final double bottomRadius = bottomChamfer * 2.5; // Even larger radius for very aggressive curve
-    final double bottomCurveHeight = bottomChamfer * 2.0; // Curves extend much higher up
+    // Ensure radii and chamfers are not larger than half the width/height
+    final double r = topCornerRadius > w / 2 ? w / 2 : topCornerRadius;
+    final double c = bottomChamfer > w / 2 ? w / 2 : bottomChamfer;
 
     // Start at the top-left, just after the curve
-    path.moveTo(0, topRadius);
+    path.moveTo(0, r);
 
-    // Top-left rounded corner (large smooth curve)
+    // Top-left rounded corner
+    // We use arcToPoint for a simpler way to draw the arc
     path.arcToPoint(
-      Offset(topRadius, 0),
-      radius: Radius.circular(topRadius),
+      Offset(r, 0),
+      radius: Radius.circular(r),
       clockwise: true,
     );
 
-    // Top edge (straight line)
-    path.lineTo(w - topRadius, 0);
+    // Top edge
+    path.lineTo(w - r, 0);
 
-    // Top-right rounded corner (large smooth curve)
+    // Top-right rounded corner
     path.arcToPoint(
-      Offset(w, topRadius),
-      radius: Radius.circular(topRadius),
+      Offset(w, r),
+      radius: Radius.circular(r),
       clockwise: true,
     );
 
-    // Right edge (much shorter - straight line down to bottom curve)
-    path.lineTo(w, h - bottomCurveHeight);
+    // Right edge
+    path.lineTo(w, h - c);
 
-    // Bottom-right rounded corner (very aggressive inward curve)
-    path.arcToPoint(
-      Offset(w / 2 + bottomRadius / 4, h), // Curves even more aggressively toward center
-      radius: Radius.circular(bottomRadius),
-      clockwise: true,
-    );
+    // Bottom-right chamfer
+    path.lineTo(w - c, h);
 
-    // Bottom edge (very short straight line - quarter of the width)
-    path.lineTo(w / 2 - bottomRadius / 4, h);
+    // Bottom edge
+    path.lineTo(c, h);
 
-    // Bottom-left rounded corner (very aggressive inward curve)
-    path.arcToPoint(
-      Offset(0, h - bottomCurveHeight),
-      radius: Radius.circular(bottomRadius),
-      clockwise: true,
-    );
+    // Bottom-left chamfer
+    path.lineTo(0, h - c);
 
-    // Left edge (much shorter - straight line back to start)
+    // Left edge (implicitly closed)
     path.close();
 
     return path;
