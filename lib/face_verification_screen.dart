@@ -9,6 +9,7 @@ import 'package:geolocator/geolocator.dart';
 import 'package:google_mlkit_face_detection/google_mlkit_face_detection.dart';
 import 'dart:typed_data';
 import 'dart:ui' as ui;
+import 'location_verified_success_screen.dart';
 
 class FaceVerificationScreen extends StatefulWidget {
   final String action; // 'in' or 'out'
@@ -309,6 +310,9 @@ class _FaceVerificationScreenState extends State<FaceVerificationScreen> {
       if (!mounted) return;
 
       if (result['success'] == true) {
+        String displayInfo = _formatDateTime(result);
+        String userId = result['user']?.toString() ?? 'Unknown';
+
         setState(() {
           _frameState = 'success';
           _statusMessage = (result['sp_msg']?.toString().isNotEmpty == true && result['sp_msg'] != 'None')
@@ -324,11 +328,15 @@ class _FaceVerificationScreenState extends State<FaceVerificationScreen> {
 
         if (mounted) {
           Navigator.pop(context);
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(result['msg2'] ?? 'Successfully clocked ${widget.action}! (${result['user']})'),
-              backgroundColor: Colors.green,
-              duration: const Duration(seconds: 3),
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (context) => LocationVerifiedSuccessScreen(
+                action: widget.action,
+                userId: userId,
+                dateTime: displayInfo.split(' | ').last, // Extract "DD/MM/YYYY at HH:MM:SS AM"
+                message: result['msg2']?.toString() ?? "Let's make it a great day.",
+              ),
             ),
           );
         }
@@ -453,10 +461,13 @@ class _FaceVerificationScreenState extends State<FaceVerificationScreen> {
       print('Calling unified API...');
       final result = await _verifyFaceWithUnifiedAPI(image.path);
       print('API Response received');
+        String userId = result['user']?.toString() ?? 'Unknown';
       print('Verification result: $result');
 
       if (result['success'] == true) {
         print('Verification successful! User: ${result['user']}');
+
+        String displayInfo = _formatDateTime(result);
 
         setState(() {
           _faceDetected = true;
@@ -476,11 +487,15 @@ class _FaceVerificationScreenState extends State<FaceVerificationScreen> {
         // Navigate back with success
         if (mounted) {
           Navigator.pop(context);
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(result['msg2'] ?? 'Successfully clocked ${widget.action}! (${result['user']})'),
-              backgroundColor: Colors.green,
-              duration: const Duration(seconds: 3),
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (context) => LocationVerifiedSuccessScreen(
+                action: widget.action,
+                userId: userId,
+                dateTime: displayInfo.split(' | ').last, // Extract "DD/MM/YYYY at HH:MM:SS AM"
+                message: result['msg2']?.toString() ?? "Let's make it a great day.",
+              ),
             ),
           );
         }
@@ -578,12 +593,24 @@ class _FaceVerificationScreenState extends State<FaceVerificationScreen> {
       if (streamedResponse.statusCode == 200) {
         var jsonResponse = json.decode(responseData);
 
+        // Print all available fields in the response
+        print('=== Full API Response ===');
+        print('Available fields: ${jsonResponse.keys.toList()}');
+        jsonResponse.forEach((key, value) {
+          print('$key: $value');
+        });
+        print('========================');
+
         // Check if verification was successful
         if (jsonResponse['msg'] != null &&
             jsonResponse['msg'].toString().toLowerCase().contains('success')) {
           return {
             'success': true,
             'user': jsonResponse['user'],
+            'username': jsonResponse['username'], // Client's username
+            'date': jsonResponse['date'], // Date field
+            'time': jsonResponse['time'], // Time field
+            'datetime': jsonResponse['datetime'], // Combined datetime field if available
             'msg2': jsonResponse['msg2'], // Attendance message
             'sp_msg': jsonResponse['sp_msg'], // Special message
             'message': jsonResponse['msg']
@@ -598,6 +625,12 @@ class _FaceVerificationScreenState extends State<FaceVerificationScreen> {
       } else if (streamedResponse.statusCode == 400) {
         // Bad request (spoof detected, user not found, etc.)
         var jsonResponse = json.decode(responseData);
+        print('=== API Error Response ===');
+        print('Available fields: ${jsonResponse.keys.toList()}');
+        jsonResponse.forEach((key, value) {
+          print('$key: $value');
+        });
+        print('=========================');
         return {
           'success': false,
           'message': jsonResponse['msg'] ?? 'Verification failed'
@@ -615,6 +648,25 @@ class _FaceVerificationScreenState extends State<FaceVerificationScreen> {
       print('Network error: $e');
       return {'success': false, 'message': 'Network error: ${e.toString()}'};
     }
+  }
+
+  String _formatDateTime(Map<String, dynamic> result) {
+    // Get username from API response (use 'user' field)
+    String username = result['user']?.toString() ?? 'User';
+
+    // Since API doesn't provide date/time, generate them locally
+    DateTime now = DateTime.now();
+
+    // Format date as DD/MM/YYYY
+    String dateStr = '${now.day.toString().padLeft(2, '0')}/${now.month.toString().padLeft(2, '0')}/${now.year}';
+
+    // Format time as HH:MM:SS AM/PM
+    int hour = now.hour;
+    String period = hour >= 12 ? 'PM' : 'AM';
+    int hour12 = hour > 12 ? hour - 12 : (hour == 0 ? 12 : hour);
+    String timeStr = '${hour12.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}:${now.second.toString().padLeft(2, '0')} $period';
+
+    return '$username | $dateStr at $timeStr';
   }
 
   Color _getFrameColor() {
