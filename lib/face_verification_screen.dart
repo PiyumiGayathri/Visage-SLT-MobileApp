@@ -540,7 +540,7 @@ class _FaceVerificationScreenState extends State<FaceVerificationScreen> {
   }
 
   Future<Map<String, dynamic>> _verifyFaceWithUnifiedAPI(String imagePath) async {
-    const apiUrl = 'https://ientrada.raccoon-ai.io/api/verify_face';
+    const apiUrl = 'https://visage.sltdigitallab.lk/api/verify_face';
 
     try {
       print('Sending request to: $apiUrl');
