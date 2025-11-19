@@ -104,14 +104,25 @@ class AppTitle extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Text(
-      'VISAGE',
-      style: TextStyle(
-        fontSize: MediaQuery.of(context).size.width > 400 ? 48 : 40,
-        fontWeight: FontWeight.bold,
-        color: Colors.white,
-        letterSpacing: 8,
-      ),
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Image.asset(
+          'assets/icon/app_icon.png',
+          width: 80,
+          height: 80,
+        ),
+        const SizedBox(height: 16),
+        Text(
+          'VISAGE',
+          style: TextStyle(
+            fontSize: MediaQuery.of(context).size.width > 400 ? 48 : 40,
+            fontWeight: FontWeight.bold,
+            color: Colors.white,
+            letterSpacing: 8,
+          ),
+        ),
+      ],
     );
   }
 }
