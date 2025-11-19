@@ -32,7 +32,9 @@ class _FaceVerificationScreenState extends State<FaceVerificationScreen> {
   Timer? _captureTimer;
   bool _faceDetected = false;
   String? _detectedEmpID;
-  Position? _currentPosition;
+  // Hardcoded location for F_HQ
+  final double _fixedLatitude = 6.93485;
+  final double _fixedLongitude = 79.84680;
   FaceDetector? _faceDetector;
   bool _isFaceSubmissionLocked = false;
 
@@ -64,55 +66,8 @@ class _FaceVerificationScreenState extends State<FaceVerificationScreen> {
   }
 
   Future<void> _initializeApp() async {
-    // First get location permission and current position
-    await _getCurrentLocation();
-
-    // Then initialize camera
-    if (_currentPosition != null) {
-      await _initializeCamera();
-    }
-  }
-
-  Future<void> _getCurrentLocation() async {
-    setState(() {
-      _statusMessage = 'Requesting location permission...';
-    });
-
-    // Check location permission
-    LocationPermission permission = await Geolocator.checkPermission();
-    if (permission == LocationPermission.denied) {
-      permission = await Geolocator.requestPermission();
-      if (permission == LocationPermission.denied) {
-        setState(() {
-          _statusMessage = 'Location permission denied. Please enable it to continue.';
-        });
-        return;
-      }
-    }
-
-    if (permission == LocationPermission.deniedForever) {
-      setState(() {
-        _statusMessage = 'Location permission permanently denied. Please enable in settings.';
-      });
-      return;
-    }
-
-    // Get current position
-    try {
-      setState(() {
-        _statusMessage = 'Getting your location...';
-      });
-
-      _currentPosition = await Geolocator.getCurrentPosition(
-        desiredAccuracy: LocationAccuracy.high,
-      );
-
-      print('Current location: ${_currentPosition!.latitude}, ${_currentPosition!.longitude}');
-    } catch (e) {
-      setState(() {
-        _statusMessage = 'Failed to get location: ${e.toString()}';
-      });
-    }
+    // Using hardcoded location for F_HQ, directly initialize camera
+    await _initializeCamera();
   }
 
   Future<void> _initializeCamera() async {
@@ -425,15 +380,6 @@ class _FaceVerificationScreenState extends State<FaceVerificationScreen> {
       return;
     }
 
-    if (_currentPosition == null) {
-      print('Location not available');
-      setState(() {
-        _statusMessage = 'Getting location...';
-      });
-      await _getCurrentLocation();
-      return;
-    }
-
     print('Starting capture process');
 
     setState(() {
@@ -563,11 +509,11 @@ class _FaceVerificationScreenState extends State<FaceVerificationScreen> {
       var request = http.MultipartRequest('POST', Uri.parse(apiUrl));
 
       // Add headers
-      request.headers['api'] = 'NsHPq832MX';
-      request.headers['user'] = 'FaceAccuracyTesting';
+      request.headers['api'] = 'Up8FPhVfYi';
+      request.headers['user'] = 'slt';
       request.headers['other'] = widget.action == 'in' ? 'I' : 'O';
-      request.headers['userlat'] = _currentPosition!.latitude.toString();
-      request.headers['userlon'] = _currentPosition!.longitude.toString();
+      request.headers['userlat'] = _fixedLatitude.toString();
+      request.headers['userlon'] = _fixedLongitude.toString();
 
       // Add image file
       var imageFile = await http.MultipartFile.fromPath('image', imagePath);
@@ -575,7 +521,7 @@ class _FaceVerificationScreenState extends State<FaceVerificationScreen> {
 
       print('Request headers: ${request.headers}');
       print('Sending image: $imagePath');
-      print('Location: ${_currentPosition!.latitude}, ${_currentPosition!.longitude}');
+      print('Location (F_HQ): $_fixedLatitude, $_fixedLongitude');
 
       // Send request with timeout
       var streamedResponse = await request.send().timeout(
