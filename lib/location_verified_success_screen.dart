@@ -29,6 +29,14 @@ class LocationVerifiedSuccessScreen extends StatelessWidget {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
+              // App icon
+              Image.asset(
+                'assets/icon/app_icon.png',
+                width: 80,
+                height: 80,
+              ),
+              const SizedBox(height: 16),
+
               // Success icon
               Container(
                 width: 100,

@@ -3,6 +3,7 @@ import 'location_verified_screen.dart';
 import 'package:safe_device/safe_device.dart';
 import 'services/kiosk_mode_service.dart';
 import 'widgets/exit_kiosk_dialog.dart';
+import 'package:permission_handler/permission_handler.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -39,25 +40,75 @@ class DeveloperModeChecker extends StatefulWidget {
 class _DeveloperModeCheckerState extends State<DeveloperModeChecker> {
   bool _isChecking = true;
   bool _kioskModeActive = false;
+  String _statusMessage = 'Initializing...';
 
   @override
   void initState() {
     super.initState();
-    _initializeKioskMode();
+    _initializeApp();
   }
 
-  Future<void> _initializeKioskMode() async {
-    // Start kiosk mode when app launches
+  Future<void> _initializeApp() async {
+    // CRITICAL FIX: Request ALL permissions BEFORE starting kiosk mode
+    // Samsung blocks permission dialogs during kiosk mode!
+
+    setState(() {
+      _statusMessage = 'Requesting permissions...';
+    });
+
+    // Request camera permission first
+    await _requestCameraPermission();
+
+    // Request location permissions
+    await _requestLocationPermissions();
+
+    // Small delay to ensure permissions are fully processed
+    await Future.delayed(const Duration(milliseconds: 500));
+
+    // NOW start kiosk mode after all permissions are granted
+    setState(() {
+      _statusMessage = 'Starting kiosk mode...';
+    });
+
     bool success = await KioskModeService.startKioskMode();
     if (mounted) {
       setState(() {
         _kioskModeActive = success;
         _isChecking = false;
+        _statusMessage = success ? 'Kiosk Mode Active' : 'Kiosk Mode Failed';
       });
     }
 
     // Enable immersive mode (hide system bars)
     await KioskModeService.enableImmersiveMode();
+  }
+
+  Future<void> _requestCameraPermission() async {
+    try {
+      var status = await Permission.camera.status;
+      if (!status.isGranted) {
+        await Permission.camera.request();
+      }
+    } catch (e) {
+      print('Error requesting camera permission: $e');
+    }
+  }
+
+  Future<void> _requestLocationPermissions() async {
+    try {
+      var status = await Permission.location.status;
+      if (!status.isGranted) {
+        await Permission.location.request();
+      }
+
+      // Also request location when in use
+      var locationWhenInUse = await Permission.locationWhenInUse.status;
+      if (!locationWhenInUse.isGranted) {
+        await Permission.locationWhenInUse.request();
+      }
+    } catch (e) {
+      print('Error requesting location permission: $e');
+    }
   }
 
 
@@ -83,8 +134,9 @@ class _DeveloperModeCheckerState extends State<DeveloperModeChecker> {
               const CircularProgressIndicator(),
               const SizedBox(height: 16),
               Text(
-                _kioskModeActive ? 'Kiosk Mode Active' : 'Initializing...',
+                _statusMessage,
                 style: const TextStyle(fontSize: 16),
+                textAlign: TextAlign.center,
               ),
             ],
           ),

@@ -121,13 +121,4 @@ class MainActivity : FlutterActivity() {
         }
         // If in kiosk mode, do nothing (Flutter will handle it with WillPopScope)
     }
-
-    override fun onPause() {
-        super.onPause()
-        // Check if lock task mode was disabled (user clicked "No thanks")
-        if (!isInKioskMode()) {
-            // User declined pinning, close the app
-            finishAndRemoveTask()
-        }
-    }
 }

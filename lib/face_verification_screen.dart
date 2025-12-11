@@ -75,8 +75,11 @@ class _FaceVerificationScreenState extends State<FaceVerificationScreen> {
       _statusMessage = 'Requesting camera permission...';
     });
 
-    // Request camera permission
-    final status = await Permission.camera.request();
+    // Request camera permission - check if already granted first
+    var status = await Permission.camera.status;
+    if (!status.isGranted) {
+      status = await Permission.camera.request();
+    }
 
     if (status.isDenied) {
       setState(() {
@@ -92,10 +95,21 @@ class _FaceVerificationScreenState extends State<FaceVerificationScreen> {
       return;
     }
 
-    // Permission granted, initialize camera
+    // Permission granted, initialize camera with Samsung-specific error handling
     try {
-      _cameras = await availableCameras();
-      if (_cameras!.isEmpty) {
+      setState(() {
+        _statusMessage = 'Initializing camera...';
+      });
+
+      // FIX: Wrap camera access in try-catch for Samsung devices
+      _cameras = await availableCameras().timeout(
+        const Duration(seconds: 10),
+        onTimeout: () {
+          throw Exception('Camera initialization timeout - device may be in restricted mode');
+        },
+      );
+
+      if (_cameras == null || _cameras!.isEmpty) {
         setState(() {
           _statusMessage = 'No camera found on this device';
         });
@@ -108,14 +122,22 @@ class _FaceVerificationScreenState extends State<FaceVerificationScreen> {
         orElse: () => _cameras!.first,
       );
 
+      // FIX: Use medium resolution for better Samsung compatibility
       _controller = CameraController(
         frontCamera,
-        ResolutionPreset.medium,
+        ResolutionPreset.medium, // Safe resolution for Samsung devices
         enableAudio: false,
         imageFormatGroup: ImageFormatGroup.yuv420, // Use YUV420 for streaming
       );
 
-      await _controller!.initialize();
+      // FIX: Add timeout to initialization
+      await _controller!.initialize().timeout(
+        const Duration(seconds: 10),
+        onTimeout: () {
+          throw Exception('Camera initialization timeout - Samsung may be blocking camera during kiosk mode');
+        },
+      );
+
       print('Camera initialized successfully');
 
       // Start image stream to ensure camera is actively streaming
@@ -132,11 +154,28 @@ class _FaceVerificationScreenState extends State<FaceVerificationScreen> {
         });
         _startAutomaticCapture();
       }
-    } catch (e) {
+    } on CameraException catch (e) {
+      // Samsung-specific camera errors
+      print('CameraException: ${e.code} - ${e.description}');
+      if (mounted) {
+        setState(() {
+          _statusMessage = 'Camera error: ${e.description ?? e.code}\nTry restarting the app';
+        });
+      }
+    } on Exception catch (e) {
       print('Camera initialization error: $e');
-      setState(() {
-        _statusMessage = 'Camera error: ${e.toString()}';
-      });
+      if (mounted) {
+        setState(() {
+          _statusMessage = 'Camera error: ${e.toString()}\nThis may occur if permissions were granted during kiosk mode';
+        });
+      }
+    } catch (e) {
+      print('Unexpected camera error: $e');
+      if (mounted) {
+        setState(() {
+          _statusMessage = 'Unexpected error: ${e.toString()}';
+        });
+      }
     }
   }
 
@@ -145,6 +184,8 @@ class _FaceVerificationScreenState extends State<FaceVerificationScreen> {
       print('Cannot start image stream - controller not ready');
       return;
     }
+
+    // FIX: Add comprehensive error handling for Samsung devices
     try {
       await _controller!.startImageStream((CameraImage image) async {
         if (!_isStreamingStarted) {
@@ -206,9 +247,21 @@ class _FaceVerificationScreenState extends State<FaceVerificationScreen> {
         }
       });
       print('Called startImageStream');
+    } on CameraException catch (e) {
+      // Samsung-specific camera exceptions
+      print('CameraException starting image stream: ${e.code} - ${e.description}');
+      if (mounted) {
+        setState(() {
+          _statusMessage = 'Camera stream error: ${e.description ?? e.code}';
+        });
+      }
     } catch (e) {
       print('Error starting image stream: $e');
-      return;
+      if (mounted) {
+        setState(() {
+          _statusMessage = 'Error starting camera stream. Please restart the app.';
+        });
+      }
     }
     return;
   }
