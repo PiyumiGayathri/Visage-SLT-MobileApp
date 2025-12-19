@@ -1,14 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:camera/camera.dart';
-import 'dart:io';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'package:permission_handler/permission_handler.dart';
 import 'dart:async';
-import 'package:geolocator/geolocator.dart';
 import 'package:google_mlkit_face_detection/google_mlkit_face_detection.dart';
 import 'dart:typed_data';
-import 'dart:ui' as ui;
+import 'package:flutter/foundation.dart'; // For WriteBuffer
 import 'location_verified_success_screen.dart';
 
 class FaceVerificationScreen extends StatefulWidget {
@@ -44,6 +42,14 @@ class _FaceVerificationScreenState extends State<FaceVerificationScreen> {
   // Track if image stream is active
   bool _isStreamingStarted = false;
 
+  // Frame throttling for Samsung devices - prevent buffer overload
+  DateTime? _lastFrameTime;
+  static const Duration _frameThrottleDuration = Duration(milliseconds: 500);
+
+  // Samsung-specific delays
+  static const Duration _samsungStopDelay = Duration(milliseconds: 500);
+  static const Duration _samsungStartDelay = Duration(milliseconds: 300);
+
   @override
   void initState() {
     super.initState();
@@ -58,10 +64,35 @@ class _FaceVerificationScreenState extends State<FaceVerificationScreen> {
   }
 
   @override
-  void dispose() {
-    _faceDetector?.close();
-    _controller?.dispose();
+  void dispose() async {
     _captureTimer?.cancel();
+
+    // Safely stop image stream before disposal
+    if (_isStreamingStarted && _controller != null) {
+      try {
+        await _controller!.stopImageStream();
+        _isStreamingStarted = false;
+      } catch (e) {
+        print('Error stopping stream in dispose: $e');
+      }
+    }
+
+    // Close MLKit detector
+    try {
+      await _faceDetector?.close();
+      _faceDetector = null;
+    } catch (e) {
+      print('Error closing face detector: $e');
+    }
+
+    // Dispose camera controller
+    try {
+      await _controller?.dispose();
+      _controller = null;
+    } catch (e) {
+      print('Error disposing controller: $e');
+    }
+
     super.dispose();
   }
 
@@ -140,11 +171,8 @@ class _FaceVerificationScreenState extends State<FaceVerificationScreen> {
 
       print('Camera initialized successfully');
 
-      // Start image stream to ensure camera is actively streaming
-      await _startImageStream();
-
-      // Additional delay to ensure streaming is fully active
-      await Future.delayed(const Duration(milliseconds: 1500));
+      // Start image stream using safe method
+      await _safeStartImageStream();
 
       if (mounted) {
         setState(() {
@@ -152,7 +180,6 @@ class _FaceVerificationScreenState extends State<FaceVerificationScreen> {
           _frameState = 'idle';
           _statusMessage = 'Position your face in the frame';
         });
-        _startAutomaticCapture();
       }
     } on CameraException catch (e) {
       // Samsung-specific camera errors
@@ -179,77 +206,28 @@ class _FaceVerificationScreenState extends State<FaceVerificationScreen> {
     }
   }
 
-  Future<void> _startImageStream() async {
+  /// Safely start image stream with Samsung-specific delays and error handling
+  Future<void> _safeStartImageStream() async {
     if (_controller == null || !_controller!.value.isInitialized) {
       print('Cannot start image stream - controller not ready');
       return;
     }
 
-    // FIX: Add comprehensive error handling for Samsung devices
+    if (_isStreamingStarted) {
+      print('Image stream already started');
+      return;
+    }
+
     try {
-      await _controller!.startImageStream((CameraImage image) async {
-        if (!_isStreamingStarted) {
-          _isStreamingStarted = true;
-          print('Image stream started successfully');
-        }
-        if (_isProcessing || _isFaceSubmissionLocked) return;
-        _isProcessing = true;
-        try {
-          // Convert CameraImage to InputImage (Android only, YUV420 format)
-          if (image.format.group != ImageFormatGroup.yuv420) {
-            print('Unsupported image format for ML Kit');
-            _isProcessing = false;
-            return;
-          }
-          // Concatenate all planes' bytes
-          final int totalBytes = image.planes.fold(0, (sum, plane) => sum + plane.bytes.length);
-          final Uint8List bytes = Uint8List(totalBytes);
-          int offset = 0;
-          for (final Plane plane in image.planes) {
-            bytes.setRange(offset, offset + plane.bytes.length, plane.bytes);
-            offset += plane.bytes.length;
-          }
-          final Size imageSize = Size(image.width.toDouble(), image.height.toDouble());
-          final camera = _controller!.description;
-          final rotation = _rotationIntToImageRotation(camera.sensorOrientation);
-          final inputImage = InputImage.fromBytes(
-            bytes: bytes,
-            metadata: InputImageMetadata(
-              size: imageSize,
-              rotation: rotation,
-              format: InputImageFormat.yuv420,
-              bytesPerRow: image.planes[0].bytesPerRow,
-            ),
-          );
-          final faces = await _faceDetector!.processImage(inputImage);
-          if (faces.isNotEmpty) {
-            print('Face detected! Sending to backend...');
-            _isFaceSubmissionLocked = true;
-            _faceDetected = true;
-            setState(() {
-              _frameState = 'scanning';
-              _statusMessage = 'Face detected! Sending for verification...';
-            });
-            await _sendFaceDetailsToBackend();
-            await Future.delayed(const Duration(seconds: 5));
-            _isFaceSubmissionLocked = false;
-            _isProcessing = false;
-            return;
-          } else {
-            _faceDetected = false;
-            _isProcessing = false;
-            return;
-          }
-        } catch (e) {
-          print('Face detection error: $e');
-          _isProcessing = false;
-          return;
-        }
-      });
-      print('Called startImageStream');
+      // Samsung-specific delay before starting stream
+      await Future.delayed(_samsungStartDelay);
+
+      await _controller!.startImageStream(_onCameraFrame);
+      _isStreamingStarted = true;
+      print('Image stream started successfully');
     } on CameraException catch (e) {
-      // Samsung-specific camera exceptions
       print('CameraException starting image stream: ${e.code} - ${e.description}');
+      _isStreamingStarted = false;
       if (mounted) {
         setState(() {
           _statusMessage = 'Camera stream error: ${e.description ?? e.code}';
@@ -257,13 +235,266 @@ class _FaceVerificationScreenState extends State<FaceVerificationScreen> {
       }
     } catch (e) {
       print('Error starting image stream: $e');
+      _isStreamingStarted = false;
       if (mounted) {
         setState(() {
           _statusMessage = 'Error starting camera stream. Please restart the app.';
         });
       }
     }
-    return;
+  }
+
+  /// Safely stop image stream with Samsung-specific delays
+  Future<void> _safeStopImageStream() async {
+    if (_controller == null || !_controller!.value.isInitialized) {
+      _isStreamingStarted = false;
+      return;
+    }
+
+    if (!_isStreamingStarted) {
+      return;
+    }
+
+    try {
+      await _controller!.stopImageStream();
+      _isStreamingStarted = false;
+      print('Image stream stopped successfully');
+
+      // Samsung-specific delay after stopping stream to allow hardware to release buffers
+      await Future.delayed(_samsungStopDelay);
+    } on CameraException catch (e) {
+      print('CameraException stopping image stream: ${e.code} - ${e.description}');
+      _isStreamingStarted = false;
+    } catch (e) {
+      print('Error stopping image stream: $e');
+      _isStreamingStarted = false;
+    }
+  }
+
+  /// Recreate FaceDetector to prevent native memory leaks on Samsung devices
+  Future<void> _recreateFaceDetector() async {
+    try {
+      // Close existing detector
+      if (_faceDetector != null) {
+        await _faceDetector!.close();
+        _faceDetector = null;
+        print('FaceDetector closed');
+      }
+
+      // Small delay to ensure native resources are released
+      await Future.delayed(const Duration(milliseconds: 100));
+
+      // Create fresh detector
+      _faceDetector = FaceDetector(
+        options: FaceDetectorOptions(
+          enableContours: false,
+          enableLandmarks: false,
+          performanceMode: FaceDetectorMode.fast,
+        ),
+      );
+      print('FaceDetector recreated');
+    } catch (e) {
+      print('Error recreating FaceDetector: $e');
+    }
+  }
+
+  /// Camera frame callback with throttling to prevent buffer overload
+  void _onCameraFrame(CameraImage image) async {
+    // Frame throttling - ignore frames if processing or too soon after last frame
+    if (_isProcessing || _isFaceSubmissionLocked) return;
+
+    final now = DateTime.now();
+    if (_lastFrameTime != null && now.difference(_lastFrameTime!) < _frameThrottleDuration) {
+      return; // Skip this frame
+    }
+
+    _lastFrameTime = now;
+    _isProcessing = true;
+
+    try {
+      await _detectFaces(image);
+    } catch (e) {
+      print('Error in _onCameraFrame: $e');
+    } finally {
+      _isProcessing = false;
+    }
+  }
+
+  /// Detect faces in camera frame using MLKit
+  Future<void> _detectFaces(CameraImage image) async {
+    try {
+      // Validate image format
+      if (image.format.group != ImageFormatGroup.yuv420) {
+        print('Unsupported image format for ML Kit');
+        return;
+      }
+
+      // Validate FaceDetector exists
+      if (_faceDetector == null) {
+        print('FaceDetector is null, recreating...');
+        await _recreateFaceDetector();
+        if (_faceDetector == null) return;
+      }
+
+      // Get camera description for rotation
+      final camera = _controller!.description;
+      final rotation = _rotationIntToImageRotation(camera.sensorOrientation);
+
+      // Build proper metadata for YUV420 format
+      final WriteBuffer allBytes = WriteBuffer();
+      for (final Plane plane in image.planes) {
+        allBytes.putUint8List(plane.bytes);
+      }
+      final bytes = allBytes.done().buffer.asUint8List();
+
+      final Size imageSize = Size(image.width.toDouble(), image.height.toDouble());
+
+      // Create InputImage with proper YUV420 format
+      final inputImage = InputImage.fromBytes(
+        bytes: bytes,
+        metadata: InputImageMetadata(
+          size: imageSize,
+          rotation: rotation,
+          format: InputImageFormat.nv21, // Use NV21 for Android YUV420
+          bytesPerRow: image.planes[0].bytesPerRow,
+        ),
+      );
+
+      // Process image with MLKit
+      final faces = await _faceDetector!.processImage(inputImage);
+
+      if (faces.isNotEmpty && !_isFaceSubmissionLocked) {
+        print('Face detected! Initiating verification...');
+        _isFaceSubmissionLocked = true;
+        _faceDetected = true;
+
+        if (mounted) {
+          setState(() {
+            _frameState = 'scanning';
+            _statusMessage = 'Face detected! Sending for verification...';
+          });
+        }
+
+        // Run face scan in background
+        _runFaceScan();
+      }
+    } catch (e) {
+      print('Face detection error: $e');
+    }
+  }
+
+  /// Run complete face scan cycle with proper resource management
+  Future<void> _runFaceScan() async {
+    try {
+      // Step 1: Safely stop image stream
+      await _safeStopImageStream();
+
+      // Step 2: Check controller is still valid
+      if (!mounted || _controller == null || !_controller!.value.isInitialized) {
+        _isFaceSubmissionLocked = false;
+        return;
+      }
+
+      // Step 3: Take picture
+      final image = await _controller!.takePicture();
+      print('Picture taken: ${image.path}');
+
+      // Step 4: Close and recreate FaceDetector to prevent memory leaks
+      await _recreateFaceDetector();
+
+      // Step 5: Send to backend
+      final result = await _verifyFaceWithUnifiedAPI(image.path);
+
+      // Step 6: Handle result
+      if (!mounted) return;
+
+      if (result['success'] == true) {
+        await _handleVerificationSuccess(result);
+      } else {
+        await _handleVerificationFailure(result);
+      }
+
+      // Step 7: Safely restart image stream
+      if (mounted && !_faceDetected) {
+        await _safeStartImageStream();
+      }
+    } catch (e) {
+      print('Error in _runFaceScan: $e');
+
+      if (mounted) {
+        setState(() {
+          _frameState = 'error';
+          _statusMessage = 'Error: ${e.toString()}';
+        });
+
+        // Try to restart stream
+        await Future.delayed(const Duration(seconds: 2));
+        if (mounted && !_faceDetected) {
+          await _safeStartImageStream();
+          setState(() {
+            _frameState = 'idle';
+            _statusMessage = 'Position your face in the frame';
+          });
+        }
+      }
+    } finally {
+      _isFaceSubmissionLocked = false;
+    }
+  }
+
+  /// Handle successful verification
+  Future<void> _handleVerificationSuccess(Map<String, dynamic> result) async {
+    String displayInfo = _formatDateTime(result);
+    String userId = result['user']?.toString() ?? 'Unknown';
+
+    setState(() {
+      _frameState = 'success';
+      _statusMessage = (result['sp_msg']?.toString().isNotEmpty == true && result['sp_msg'] != 'None')
+          ? result['sp_msg']
+          : (result['msg2']?.toString().isNotEmpty == true ? result['msg2'] : 'Face verified!');
+      _detectedEmpID = result['user'];
+      _faceDetected = true;
+    });
+
+    // Stop timer and navigate
+    _captureTimer?.cancel();
+    await Future.delayed(const Duration(milliseconds: 1500));
+
+    if (mounted) {
+      Navigator.pop(context);
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (context) => LocationVerifiedSuccessScreen(
+            action: widget.action,
+            userId: userId,
+            dateTime: displayInfo.split(' | ').last,
+            message: result['msg2']?.toString() ?? "Let's make it a great day.",
+          ),
+        ),
+      );
+    }
+  }
+
+  /// Handle failed verification
+  Future<void> _handleVerificationFailure(Map<String, dynamic> result) async {
+    setState(() {
+      _frameState = 'error';
+      _statusMessage = (result['message']?.toString().isNotEmpty == true && result['message'] != 'None')
+          ? result['message']
+          : 'Verification failed';
+      _detectedEmpID = null;
+      _faceDetected = false;
+    });
+
+    // Reset to idle after showing error
+    await Future.delayed(const Duration(seconds: 3));
+    if (mounted && !_faceDetected) {
+      setState(() {
+        _frameState = 'idle';
+        _statusMessage = 'Position your face in the frame';
+      });
+    }
   }
 
   InputImageRotation _rotationIntToImageRotation(int rotation) {
@@ -278,123 +509,6 @@ class _FaceVerificationScreenState extends State<FaceVerificationScreen> {
         return InputImageRotation.rotation270deg;
       default:
         return InputImageRotation.rotation0deg;
-    }
-  }
-
-  Future<void> _sendFaceDetailsToBackend() async {
-    if (!mounted || _controller == null || !_controller!.value.isInitialized) {
-      _isFaceSubmissionLocked = false;
-      _isProcessing = false;
-      return;
-    }
-
-    try {
-      // Stop the stream and wait a bit longer for camera to stabilize
-      if (_isStreamingStarted) {
-        await _controller!.stopImageStream();
-        _isStreamingStarted = false;
-        print('Image stream stopped for face detection capture');
-        // Increased delay to let camera settle
-        await Future.delayed(const Duration(milliseconds: 300));
-      }
-
-      // Check again if controller is still valid
-      if (!mounted || _controller == null || !_controller!.value.isInitialized) {
-        _isFaceSubmissionLocked = false;
-        _isProcessing = false;
-        return;
-      }
-
-      final image = await _controller!.takePicture();
-      print('Image captured from face detection: ${image.path}');
-
-      // Restart stream before API call
-      if (mounted && _controller != null) {
-        await _startImageStream();
-      }
-
-      final result = await _verifyFaceWithUnifiedAPI(image.path);
-
-      if (!mounted) return;
-
-      if (result['success'] == true) {
-        String displayInfo = _formatDateTime(result);
-        String userId = result['user']?.toString() ?? 'Unknown';
-
-        setState(() {
-          _frameState = 'success';
-          _statusMessage = (result['sp_msg']?.toString().isNotEmpty == true && result['sp_msg'] != 'None')
-              ? result['sp_msg']
-              : (result['msg2']?.toString().isNotEmpty == true ? result['msg2'] : 'Face verified!');
-          _detectedEmpID = result['user'];
-          _faceDetected = true;
-        });
-
-        // Stop timer and navigate
-        _captureTimer?.cancel();
-        await Future.delayed(const Duration(milliseconds: 1500));
-
-        if (mounted) {
-          Navigator.pop(context);
-          Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (context) => LocationVerifiedSuccessScreen(
-                action: widget.action,
-                userId: userId,
-                dateTime: displayInfo.split(' | ').last, // Extract "DD/MM/YYYY at HH:MM:SS AM"
-                message: result['msg2']?.toString() ?? "Let's make it a great day.",
-              ),
-            ),
-          );
-        }
-      } else {
-        setState(() {
-          _frameState = 'error';
-          _statusMessage = (result['message']?.toString().isNotEmpty == true && result['message'] != 'None')
-              ? result['message']
-              : 'Verification failed';
-          _detectedEmpID = null;
-          _faceDetected = false;
-        });
-
-        // Reset to idle after showing error
-        await Future.delayed(const Duration(seconds: 3));
-        if (mounted && !_faceDetected) {
-          setState(() {
-            _frameState = 'idle';
-            _statusMessage = 'Position your face in the frame';
-          });
-        }
-      }
-    } catch (e) {
-      print('Error in _sendFaceDetailsToBackend: $e');
-      if (mounted) {
-        setState(() {
-          _frameState = 'error';
-          _statusMessage = 'Error: ${e.toString()}';
-        });
-
-        // Try to restart stream
-        try {
-          if (!_isStreamingStarted && _controller != null) {
-            await _startImageStream();
-          }
-        } catch (streamError) {
-          print('Error restarting stream: $streamError');
-        }
-
-        await Future.delayed(const Duration(seconds: 2));
-        if (mounted && !_faceDetected) {
-          setState(() {
-            _frameState = 'idle';
-            _statusMessage = 'Position your face in the frame';
-          });
-        }
-      }
-    } finally {
-      _isFaceSubmissionLocked = false;
-      _isProcessing = false;
     }
   }
 
@@ -455,7 +569,7 @@ class _FaceVerificationScreenState extends State<FaceVerificationScreen> {
       print('Image captured successfully: ${image.path}');
 
       // Restart image stream
-      await _startImageStream();
+      await _safeStartImageStream();
 
       print('Calling unified API...');
       final result = await _verifyFaceWithUnifiedAPI(image.path);
@@ -528,7 +642,7 @@ class _FaceVerificationScreenState extends State<FaceVerificationScreen> {
       // Try to restart image stream
       try {
         if (!_isStreamingStarted) {
-          await _startImageStream();
+          await _safeStartImageStream();
         }
       } catch (streamError) {
         print('Error restarting stream: $streamError');
