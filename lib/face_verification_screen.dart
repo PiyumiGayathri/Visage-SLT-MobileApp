@@ -30,6 +30,7 @@ class _FaceVerificationScreenState extends State<FaceVerificationScreen> {
   Timer? _captureTimer;
   bool _faceDetected = false;
   String? _detectedEmpID;
+  Timer? _idleTimer;
   // Hardcoded location for F_HQ
   final double _fixedLatitude = 6.93485;
   final double _fixedLongitude = 79.84680;
@@ -66,6 +67,7 @@ class _FaceVerificationScreenState extends State<FaceVerificationScreen> {
   @override
   void dispose() async {
     _captureTimer?.cancel();
+    _idleTimer?.cancel();
 
     // Safely stop image stream before disposal
     if (_isStreamingStarted && _controller != null) {
@@ -180,6 +182,9 @@ class _FaceVerificationScreenState extends State<FaceVerificationScreen> {
           _frameState = 'idle';
           _statusMessage = 'Position your face in the frame';
         });
+
+        // Start idle timer - return to home after 10 seconds of no face detection
+        _startIdleTimer();
       }
     } on CameraException catch (e) {
       // Samsung-specific camera errors
@@ -320,6 +325,18 @@ class _FaceVerificationScreenState extends State<FaceVerificationScreen> {
     }
   }
 
+  /// Start idle timer - returns to home screen after 10 seconds of no face detection
+  void _startIdleTimer() {
+    _idleTimer?.cancel();
+    _idleTimer = Timer(const Duration(seconds: 10), () {
+      if (mounted && !_faceDetected) {
+        print('Idle timeout - returning to home screen after 10 seconds of no face detection');
+        Navigator.pop(context);
+      }
+    });
+  }
+
+
   /// Detect faces in camera frame using MLKit
   Future<void> _detectFaces(CameraImage image) async {
     try {
@@ -367,6 +384,9 @@ class _FaceVerificationScreenState extends State<FaceVerificationScreen> {
         print('Face detected! Initiating verification...');
         _isFaceSubmissionLocked = true;
         _faceDetected = true;
+
+        // Cancel idle timer since face was detected
+        _idleTimer?.cancel();
 
         if (mounted) {
           setState(() {
