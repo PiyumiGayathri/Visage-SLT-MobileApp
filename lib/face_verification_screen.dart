@@ -514,6 +514,9 @@ class _FaceVerificationScreenState extends State<FaceVerificationScreen> {
         _frameState = 'idle';
         _statusMessage = 'Position your face in the frame';
       });
+
+      // Restart idle timer after verification failure
+      _startIdleTimer();
     }
   }
 
