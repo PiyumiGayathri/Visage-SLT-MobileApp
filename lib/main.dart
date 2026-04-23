@@ -4,6 +4,8 @@ import 'package:safe_device/safe_device.dart';
 import 'services/kiosk_mode_service.dart';
 import 'widgets/exit_kiosk_dialog.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'package:visage_app/services/mock_location_service.dart';
+import 'package:visage_app/mock_location_warning_screen.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -25,7 +27,46 @@ class MyApp extends StatelessWidget {
         ),
         useMaterial3: true,
       ),
-      home: const DeveloperModeChecker(),
+      home: const InitialCheckScreen(),
+    );
+  }
+}
+
+class InitialCheckScreen extends StatelessWidget {
+  const InitialCheckScreen({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<bool>(
+      future: MockLocationService.isMockLocationEnabled(),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Scaffold(
+            body: Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  CircularProgressIndicator(),
+                  SizedBox(height: 16),
+                  Text(
+                    'Verifying location settings...',
+                    style: TextStyle(fontSize: 16),
+                    textAlign: TextAlign.center,
+                  ),
+                ],
+              ),
+            ),
+          );
+        }
+
+        if (snapshot.hasData && snapshot.data == true) {
+          // Mock location is enabled, show warning screen.
+          return const MockLocationWarningScreen();
+        } else {
+          // No mock location or check failed, proceed to the app.
+          return const DeveloperModeChecker();
+        }
+      },
     );
   }
 }
@@ -49,6 +90,7 @@ class _DeveloperModeCheckerState extends State<DeveloperModeChecker> {
   }
 
   Future<void> _initializeApp() async {
+
     // CRITICAL FIX: Request ALL permissions BEFORE starting kiosk mode
     // Samsung blocks permission dialogs during kiosk mode!
 
@@ -206,4 +248,3 @@ class _DeveloperModeCheckerState extends State<DeveloperModeChecker> {
     );
   }
 }
-

@@ -8,6 +8,7 @@ import 'package:google_mlkit_face_detection/google_mlkit_face_detection.dart';
 import 'dart:typed_data';
 import 'package:flutter/foundation.dart'; // For WriteBuffer
 import 'location_verified_success_screen.dart';
+import 'package:geolocator/geolocator.dart';
 
 class FaceVerificationScreen extends StatefulWidget {
   final String action; // 'in' or 'out'
@@ -31,9 +32,8 @@ class _FaceVerificationScreenState extends State<FaceVerificationScreen> {
   bool _faceDetected = false;
   String? _detectedEmpID;
   Timer? _idleTimer;
-  // Hardcoded location for F_HQ
-  final double _fixedLatitude = 6.93485;
-  final double _fixedLongitude = 79.84680;
+  double? _currentLatitude;
+  double? _currentLongitude;
   FaceDetector? _faceDetector;
   bool _isFaceSubmissionLocked = false;
 
@@ -99,8 +99,60 @@ class _FaceVerificationScreenState extends State<FaceVerificationScreen> {
   }
 
   Future<void> _initializeApp() async {
-    // Using hardcoded location for F_HQ, directly initialize camera
+    await _getCurrentLocation();
     await _initializeCamera();
+  }
+
+  Future<void> _getCurrentLocation() async {
+    setState(() {
+      _statusMessage = 'Getting location...';
+    });
+
+    try {
+      bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
+      if (!serviceEnabled) {
+        setState(() {
+          _statusMessage = 'Location services are disabled.';
+        });
+        return;
+      }
+
+      LocationPermission permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+        if (permission == LocationPermission.denied) {
+          setState(() {
+            _statusMessage = 'Location permissions are denied.';
+          });
+          return;
+        }
+      }
+
+      if (permission == LocationPermission.deniedForever) {
+        setState(() {
+          _statusMessage = 'Location permissions are permanently denied.';
+        });
+        return;
+      }
+
+      Position position = await Geolocator.getCurrentPosition(
+        desiredAccuracy: LocationAccuracy.high,
+      );
+
+      if (mounted) {
+        setState(() {
+          _currentLatitude = position.latitude;
+          _currentLongitude = position.longitude;
+          _statusMessage = 'Location acquired. Initializing camera...';
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _statusMessage = 'Failed to get location: $e';
+        });
+      }
+    }
   }
 
   Future<void> _initializeCamera() async {
@@ -699,11 +751,11 @@ class _FaceVerificationScreenState extends State<FaceVerificationScreen> {
       var request = http.MultipartRequest('POST', Uri.parse(apiUrl));
 
       // Add headers
-      request.headers['api'] = 'Up8FPhVfYi';
-      request.headers['user'] = 'slt';
+      request.headers['api'] = '26PytkCBcZ';
+      request.headers['user'] = 'slt_interns';
       request.headers['other'] = widget.action == 'in' ? 'I' : 'O';
-      request.headers['userlat'] = _fixedLatitude.toString();
-      request.headers['userlon'] = _fixedLongitude.toString();
+      request.headers['userlat'] = _currentLatitude.toString();
+      request.headers['userlon'] = _currentLongitude.toString();
 
       // Add image file
       var imageFile = await http.MultipartFile.fromPath('image', imagePath);
@@ -711,7 +763,6 @@ class _FaceVerificationScreenState extends State<FaceVerificationScreen> {
 
       print('Request headers: ${request.headers}');
       print('Sending image: $imagePath');
-      print('Location (F_HQ): $_fixedLatitude, $_fixedLongitude');
 
       // Send request with timeout
       var streamedResponse = await request.send().timeout(
