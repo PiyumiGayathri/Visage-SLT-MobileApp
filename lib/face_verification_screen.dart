@@ -9,6 +9,7 @@ import 'dart:typed_data';
 import 'package:flutter/foundation.dart'; // For WriteBuffer
 import 'location_verified_success_screen.dart';
 import 'package:geolocator/geolocator.dart';
+import 'package:visage_app/services/mock_location_service.dart';
 
 class FaceVerificationScreen extends StatefulWidget {
   final String action; // 'in' or 'out'
@@ -103,6 +104,33 @@ class _FaceVerificationScreenState extends State<FaceVerificationScreen> {
     await _initializeCamera();
   }
 
+  /// Verify that location is not mocked before proceeding
+  Future<bool> _verifyLocationNotMocked() async {
+    try {
+      print('[SECURITY] Verifying location is not mocked...');
+
+      // Quick check: Is mock location app set?
+      final isMockAppSet = await MockLocationService.isMockLocationAppSet();
+      if (isMockAppSet) {
+        print('[SECURITY] ⚠️  Mock location app is set - blocking');
+        return false;
+      }
+
+      // Check any provider mocked
+      final isAnyProviderMocked = await MockLocationService.isAnyProviderMocked();
+      if (isAnyProviderMocked) {
+        print('[SECURITY] ⚠️  Any provider is mocked - blocking');
+        return false;
+      }
+
+      print('[SECURITY] ✓ Location verification passed');
+      return true;
+    } catch (e) {
+      print('[SECURITY] Error during location verification: $e');
+      return true; // Allow on error (don't block legitimate users)
+    }
+  }
+
   Future<void> _getCurrentLocation() async {
     setState(() {
       _statusMessage = 'Getting location...';
@@ -132,6 +160,17 @@ class _FaceVerificationScreenState extends State<FaceVerificationScreen> {
         setState(() {
           _statusMessage = 'Location permissions are permanently denied.';
         });
+        return;
+      }
+
+      // Check if location is mocked before acquiring it
+      final locationIsGenuine = await _verifyLocationNotMocked();
+      if (!locationIsGenuine) {
+        if (mounted) {
+          setState(() {
+            _statusMessage = 'Security Alert: Mock location detected.\nPlease disable location spoofing.';
+          });
+        }
         return;
       }
 
@@ -645,6 +684,45 @@ class _FaceVerificationScreenState extends State<FaceVerificationScreen> {
 
       // Restart image stream
       await _safeStartImageStream();
+
+      // ===== COMPREHENSIVE MOCK LOCATION CHECK =====
+      print('[SECURITY] Starting comprehensive mock location detection...');
+
+      if (_currentLatitude != null && _currentLongitude != null) {
+        // Perform multi-layer mock detection
+        final mockCheckResult = await MockLocationService.performComprehensiveCheck(
+          latitude: _currentLatitude!,
+          longitude: _currentLongitude!,
+          accuracy: 10.0, // Use a reasonable default if not available
+          provider: 'fused',
+        );
+
+        print('[SECURITY] Mock location check completed:');
+        print('[SECURITY]   - Is Mocked: ${mockCheckResult.isMocked}');
+        print('[SECURITY]   - Details: ${mockCheckResult.details}');
+
+        if (mockCheckResult.isMocked) {
+          print('[SECURITY] ⚠️  MOCK LOCATION DETECTED - BLOCKING ATTENDANCE');
+          setState(() {
+            _faceDetected = false;
+            _detectedEmpID = null;
+            _isProcessing = false;
+            _frameState = 'error';
+            _statusMessage = 'Security Alert: Mock location detected.\nPlease disable location spoofing and try again.';
+          });
+
+          // Reset to idle state after 4 seconds
+          Future.delayed(const Duration(seconds: 4), () {
+            if (mounted && !_faceDetected) {
+              setState(() {
+                _frameState = 'idle';
+                _statusMessage = 'Position your face in the frame';
+              });
+            }
+          });
+          return;
+        }
+      }
 
       print('Calling unified API...');
       final result = await _verifyFaceWithUnifiedAPI(image.path);

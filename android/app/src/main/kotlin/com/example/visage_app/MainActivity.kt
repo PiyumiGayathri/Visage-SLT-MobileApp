@@ -2,6 +2,7 @@ package com.example.visage_app
 
 import android.app.ActivityManager
 import android.content.Context
+import android.location.Location
 import android.os.Build
 import android.view.View
 import android.view.WindowInsets
@@ -12,10 +13,14 @@ import io.flutter.plugin.common.MethodChannel
 
 class MainActivity : FlutterActivity() {
     private val CHANNEL = "com.example.visage_app/kiosk"
+    private val MOCK_LOCATION_CHANNEL = "com.example.visage_app/mockLocation"
+
+    private var mockLocationDetector: MockLocationDetector? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
 
+        // Kiosk mode channel
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL).setMethodCallHandler { call, result ->
             when (call.method) {
                 "startKioskMode" -> {
@@ -38,6 +43,132 @@ class MainActivity : FlutterActivity() {
                     result.notImplemented()
                 }
             }
+        }
+
+        // Mock location detection channel
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, MOCK_LOCATION_CHANNEL).setMethodCallHandler { call, result ->
+            when (call.method) {
+                "isMockLocationAppSet" -> {
+                    val isMocked = isMockLocationAppSet()
+                    result.success(isMocked)
+                }
+                "isLocationMocked" -> {
+                    val latitude = call.argument<Double>("latitude")
+                    val longitude = call.argument<Double>("longitude")
+                    val accuracy = call.argument<Double>("accuracy")
+                    val provider = call.argument<String>("provider") ?: "fused"
+
+                    if (latitude != null && longitude != null) {
+                        val location = Location(provider).apply {
+                            this.latitude = latitude
+                            this.longitude = longitude
+                            if (accuracy != null) this.accuracy = accuracy.toFloat()
+                        }
+                        val isMocked = isLocationMocked(location)
+                        result.success(isMocked)
+                    } else {
+                        result.error("INVALID_ARGS", "Missing latitude or longitude", null)
+                    }
+                }
+                "isAnyProviderMocked" -> {
+                    val isMocked = isAnyProviderMocked()
+                    result.success(isMocked)
+                }
+                "performComprehensiveCheck" -> {
+                    val latitude = call.argument<Double>("latitude")
+                    val longitude = call.argument<Double>("longitude")
+                    val accuracy = call.argument<Double>("accuracy")
+                    val provider = call.argument<String>("provider")
+
+                    val location = if (latitude != null && longitude != null) {
+                        Location(provider ?: "fused").apply {
+                            this.latitude = latitude
+                            this.longitude = longitude
+                            if (accuracy != null) this.accuracy = accuracy.toFloat()
+                        }
+                    } else {
+                        null
+                    }
+
+                    val detectionResult = performComprehensiveCheck(location)
+                    result.success(detectionResult)
+                }
+                else -> {
+                    result.notImplemented()
+                }
+            }
+        }
+    }
+
+    /**
+     * Check if mock location app is currently set via AppOpsManager
+     */
+    private fun isMockLocationAppSet(): Boolean {
+        return try {
+            if (mockLocationDetector == null) {
+                mockLocationDetector = MockLocationDetector(this)
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT) {
+                mockLocationDetector!!.isMockLocationAppSet()
+            } else {
+                false
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+            false
+        }
+    }
+
+    /**
+     * Verify if a specific location is mocked
+     */
+    private fun isLocationMocked(location: Location): Boolean {
+        return try {
+            if (mockLocationDetector == null) {
+                mockLocationDetector = MockLocationDetector(this)
+            }
+            mockLocationDetector!!.isLocationMocked(location)
+        } catch (e: Exception) {
+            e.printStackTrace()
+            false
+        }
+    }
+
+    /**
+     * Check if any location provider is currently mocked
+     */
+    private fun isAnyProviderMocked(): Boolean {
+        return try {
+            if (mockLocationDetector == null) {
+                mockLocationDetector = MockLocationDetector(this)
+            }
+            mockLocationDetector!!.isAnyProviderMocked()
+        } catch (e: Exception) {
+            e.printStackTrace()
+            false
+        }
+    }
+
+    /**
+     * Perform comprehensive mock location check
+     */
+    private fun performComprehensiveCheck(location: Location?): Map<String, Any?> {
+        return try {
+            if (mockLocationDetector == null) {
+                mockLocationDetector = MockLocationDetector(this)
+            }
+            val result = mockLocationDetector!!.performComprehensiveCheck(location)
+            result.toMap()
+        } catch (e: Exception) {
+            e.printStackTrace()
+            mapOf(
+                "isMocked" to true,
+                "details" to listOf("Error during check: ${e.message}"),
+                "timestamp" to System.currentTimeMillis(),
+                "latitude" to location?.latitude,
+                "longitude" to location?.longitude,
+                "accuracy" to location?.accuracy
+            )
         }
     }
 
