@@ -11,7 +11,7 @@ import android.os.Bundle
  * Checks each location update as it's received from the system
  */
 class MockDetectionLocationListener(
-    private val context: Context,
+    context: Context,
     private val onLocationReceived: (Location, Boolean) -> Unit,
     private val onError: (String) -> Unit = {}
 ) : LocationListener {

@@ -27,22 +27,54 @@ class MockLocationDetector(private val context: Context) {
 
     /**
      * Check if mock location app is currently set via AppOpsManager
-     * This detects apps that have the "mock location" permission granted
+     * This detects if the system has a mock location provider set
      *
      * @return true if mock location app is set, false otherwise
      */
     @RequiresApi(Build.VERSION_CODES.KITKAT)
     fun isMockLocationAppSet(): Boolean {
         return try {
-            val result = appOpsManager?.noteOpNoThrow(
+            // Method 1: Check AppOpsManager for any app with mock location permission
+            val result = appOpsManager?.noteOp(
                 AppOpsManager.OPSTR_MOCK_LOCATION,
                 android.os.Process.myUid(),
                 context.packageName
             )
-            // RESULT_ALLOWED = 0, RESULT_DENIED = 1, RESULT_IGNORED = 2
-            result == AppOpsManager.MODE_ALLOWED
+            // 0 = MODE_ALLOWED means mock location is enabled on system
+            val appOpsCheck = result == 0
+
+            if (appOpsCheck) {
+                println("Mock location detected via AppOpsManager")
+                return true
+            }
+
+            // Method 2: Check if any location manager provider is set to mock
+            val allProviders = locationManager.allProviders
+            for (provider in allProviders) {
+                try {
+                    // Try to get the last known location to check if it's from mock provider
+                    val location = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                        locationManager.getLastKnownLocation(provider)
+                    } else {
+                        @Suppress("DEPRECATION")
+                        locationManager.getLastKnownLocation(provider)
+                    }
+
+                    // If we find a mocked location, mock app is set
+                    if (location != null && location.isFromMockProvider) {
+                        println("Mock location detected via provider: $provider")
+                        return true
+                    }
+                } catch (e: Exception) {
+                    // Provider not available, continue checking others
+                }
+            }
+
+            println("No mock location detected")
+            false
         } catch (e: Exception) {
             e.printStackTrace()
+            println("Error checking mock location app: ${e.message}")
             false
         }
     }
@@ -164,23 +196,36 @@ class MockLocationDetector(private val context: Context) {
         return try {
             val accuracy = location.accuracy
             val provider = location.provider
+            val speed = location.speed
+            val bearing = location.bearing
 
             // Suspicious patterns:
-            // 1. Impossibly high accuracy (< 1 meter) when using network provider
-            // 2. Exactly 0 accuracy (mock apps sometimes set this)
+            // 1. Exactly 0 accuracy (mock apps sometimes set this)
+            // 2. Impossibly high accuracy (< 0.5 meter) - indicates perfect mock
             // 3. Exactly matching accuracy values (indicates mock data)
+            // 4. Provider is "fused" but accuracy is suspiciously exact
+            // 5. Speed or bearing values are exactly 0 when moving
 
             when {
-                accuracy <= 0 -> {
-                    println("Suspicious: Accuracy is 0 or negative")
+                accuracy == 0f -> {
+                    println("Suspicious: Accuracy is exactly 0.0")
                     true
                 }
-                provider == LocationManager.NETWORK_PROVIDER && accuracy < 1 -> {
-                    println("Suspicious: Network provider with sub-meter accuracy")
+                accuracy < 0.5f && provider != LocationManager.GPS_PROVIDER -> {
+                    println("Suspicious: Sub-half-meter accuracy on $provider provider")
+                    true
+                }
+                provider == LocationManager.NETWORK_PROVIDER && accuracy < 2 -> {
+                    println("Suspicious: Network provider with sub-2m accuracy")
                     true
                 }
                 accuracy > 10000 -> {
                     println("Suspicious: Accuracy exceeds 10km (likely mock)")
+                    true
+                }
+                // Check for round numbers indicating mock
+                accuracy % 10 == 0f && accuracy > 50 -> {
+                    println("Suspicious: Accuracy is round number: $accuracy (indicates mock)")
                     true
                 }
                 else -> false

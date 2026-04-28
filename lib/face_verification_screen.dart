@@ -5,7 +5,6 @@ import 'dart:convert';
 import 'package:permission_handler/permission_handler.dart';
 import 'dart:async';
 import 'package:google_mlkit_face_detection/google_mlkit_face_detection.dart';
-import 'dart:typed_data';
 import 'package:flutter/foundation.dart'; // For WriteBuffer
 import 'location_verified_success_screen.dart';
 import 'package:geolocator/geolocator.dart';
@@ -52,6 +51,10 @@ class _FaceVerificationScreenState extends State<FaceVerificationScreen> {
   static const Duration _samsungStopDelay = Duration(milliseconds: 500);
   static const Duration _samsungStartDelay = Duration(milliseconds: 300);
 
+  // Mock location detection flag
+  bool _isMockLocationDetected = false;
+  Timer? _mockLocationCheckTimer;
+
   @override
   void initState() {
     super.initState();
@@ -66,42 +69,244 @@ class _FaceVerificationScreenState extends State<FaceVerificationScreen> {
   }
 
   @override
-  void dispose() async {
+  void dispose() {
     _captureTimer?.cancel();
     _idleTimer?.cancel();
+    _mockLocationCheckTimer?.cancel();
 
     // Safely stop image stream before disposal
     if (_isStreamingStarted && _controller != null) {
       try {
-        await _controller!.stopImageStream();
-        _isStreamingStarted = false;
+        _controller!.stopImageStream().then((_) {
+          _isStreamingStarted = false;
+        }).catchError((e) {
+          print('Error stopping stream in dispose: $e');
+        });
       } catch (e) {
         print('Error stopping stream in dispose: $e');
       }
     }
 
     // Close MLKit detector
-    try {
-      await _faceDetector?.close();
-      _faceDetector = null;
-    } catch (e) {
-      print('Error closing face detector: $e');
+    if (_faceDetector != null) {
+      try {
+        _faceDetector!.close().then((_) {
+          _faceDetector = null;
+        }).catchError((e) {
+          print('Error closing face detector: $e');
+          _faceDetector = null;
+        });
+      } catch (e) {
+        print('Error closing face detector: $e');
+        _faceDetector = null;
+      }
     }
 
     // Dispose camera controller
-    try {
-      await _controller?.dispose();
-      _controller = null;
-    } catch (e) {
-      print('Error disposing controller: $e');
+    if (_controller != null) {
+      try {
+        _controller!.dispose().then((_) {
+          _controller = null;
+        }).catchError((e) {
+          print('Error disposing controller: $e');
+          _controller = null;
+        });
+      } catch (e) {
+        print('Error disposing controller: $e');
+        _controller = null;
+      }
     }
 
     super.dispose();
   }
 
   Future<void> _initializeApp() async {
+    print('[SECURITY] App initialization started');
+
+    // FIRST: Check for mock location BEFORE anything else
+    await _checkMockLocationBeforeStart();
+
+    // If mock location is detected, don't proceed with normal initialization
+    if (_isMockLocationDetected) {
+      print('[SECURITY] Mock location detected - blocking camera initialization');
+      _startContinuousMockLocationCheck(); // Keep checking if it's disabled
+      return;
+    }
+
+    // Continue with normal initialization
     await _getCurrentLocation();
     await _initializeCamera();
+
+    // Start continuous mock location monitoring
+    _startContinuousMockLocationCheck();
+  }
+
+  /// Check for mock location before starting the app
+  Future<void> _checkMockLocationBeforeStart() async {
+    try {
+      print('[SECURITY] Performing initial mock location check...');
+
+      // Check if mock location app is set
+      final isMockAppSet = await MockLocationService.isMockLocationAppSet();
+      print('[SECURITY] Mock app set check: $isMockAppSet');
+
+      // Check any provider mocked
+      final isAnyProviderMocked = await MockLocationService.isAnyProviderMocked();
+      print('[SECURITY] Any provider mocked check: $isAnyProviderMocked');
+
+      if (isMockAppSet || isAnyProviderMocked) {
+        _isMockLocationDetected = true;
+        print('[SECURITY] ⚠️  MOCK LOCATION DETECTED ON APP START!');
+
+        if (mounted) {
+          setState(() {
+            _statusMessage = 'Security Alert: Mock Location Detected';
+          });
+
+          // Show dialog
+          _showMockLocationDialog();
+        }
+      } else {
+        _isMockLocationDetected = false;
+        print('[SECURITY] ✓ No mock location detected on app start');
+      }
+    } catch (e) {
+      print('[SECURITY] Error checking mock location at start: $e');
+    }
+  }
+
+  /// Show dialog warning user about mock location
+  void _showMockLocationDialog() {
+    showDialog(
+      context: context,
+      barrierDismissible: false, // User cannot dismiss by tapping outside
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: const Row(
+            children: [
+              Icon(Icons.warning, color: Colors.red, size: 28),
+              SizedBox(width: 12),
+              Text('Security Alert', style: TextStyle(color: Colors.red)),
+            ],
+          ),
+          content: const Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Mock Location Detected!',
+                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+              ),
+              SizedBox(height: 16),
+              Text(
+                'Your device is using a mock location app or location spoofing is enabled.',
+              ),
+              SizedBox(height: 12),
+              Text(
+                'To mark attendance:',
+                style: TextStyle(fontWeight: FontWeight.bold),
+              ),
+              SizedBox(height: 8),
+              Text('1. Disable mock location apps'),
+              Text('2. Turn off Developer Mode if enabled'),
+              Text('3. Ensure location is set to actual physical location'),
+              SizedBox(height: 12),
+              Text(
+                'This is a security measure to prevent fraudulent attendance marking.',
+                style: TextStyle(fontStyle: FontStyle.italic, color: Colors.grey),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () {
+                Navigator.of(context).pop();
+                // Go back to previous screen
+                Navigator.of(context).pop();
+              },
+              child: const Text('Exit'),
+            ),
+            ElevatedButton(
+              onPressed: () {
+                Navigator.of(context).pop();
+                // Retry check
+                _retryMockLocationCheck();
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.orange,
+              ),
+              child: const Text('Retry'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  /// Retry mock location check
+  Future<void> _retryMockLocationCheck() async {
+    print('[SECURITY] User requested retry of mock location check');
+    await _checkMockLocationBeforeStart();
+
+    if (!_isMockLocationDetected) {
+      // Mock location is now disabled, proceed with initialization
+      if (mounted) {
+        setState(() {
+          _statusMessage = 'Getting location...';
+        });
+      }
+      await _getCurrentLocation();
+      await _initializeCamera();
+    } else {
+      // Still detected, show dialog again
+      if (mounted) {
+        _showMockLocationDialog();
+      }
+    }
+  }
+
+  /// Start continuous monitoring for mock location changes
+  void _startContinuousMockLocationCheck() {
+    _mockLocationCheckTimer = Timer.periodic(
+      const Duration(seconds: 2),
+      (_) async {
+        try {
+          final isMockAppSet = await MockLocationService.isMockLocationAppSet();
+          final isAnyProviderMocked = await MockLocationService.isAnyProviderMocked();
+
+          bool wasMockDetected = _isMockLocationDetected;
+          _isMockLocationDetected = isMockAppSet || isAnyProviderMocked;
+
+          // If status changed from not-mock to mock, show dialog
+          if (!wasMockDetected && _isMockLocationDetected) {
+            print('[SECURITY] Mock location detected during monitoring!');
+            if (mounted) {
+              setState(() {
+                _statusMessage = 'Security Alert: Mock Location Detected';
+              });
+              _showMockLocationDialog();
+            }
+          }
+
+          // If status changed from mock to not-mock, allow to proceed
+          if (wasMockDetected && !_isMockLocationDetected) {
+            print('[SECURITY] Mock location disabled - allowing to proceed');
+            if (mounted) {
+              setState(() {
+                _statusMessage = 'Getting location...';
+              });
+              // Only initialize if not already initialized
+              if (!_isInitialized) {
+                await _getCurrentLocation();
+                await _initializeCamera();
+              }
+            }
+          }
+        } catch (e) {
+          print('[SECURITY] Error in continuous mock check: $e');
+        }
+      },
+    );
   }
 
   /// Verify that location is not mocked before proceeding
@@ -195,6 +400,15 @@ class _FaceVerificationScreenState extends State<FaceVerificationScreen> {
   }
 
   Future<void> _initializeCamera() async {
+    // Security check: Verify mock location is not active before initializing camera
+    if (_isMockLocationDetected) {
+      print('[SECURITY] Mock location detected - blocking camera initialization');
+      setState(() {
+        _statusMessage = 'Security Alert: Mock location detected.\nPlease disable location spoofing and retry.';
+      });
+      return;
+    }
+
     setState(() {
       _statusMessage = 'Requesting camera permission...';
     });
@@ -558,6 +772,30 @@ class _FaceVerificationScreenState extends State<FaceVerificationScreen> {
     String displayInfo = _formatDateTime(result);
     String userId = result['user']?.toString() ?? 'Unknown';
 
+    // ===== FINAL MOCK LOCATION CHECK BEFORE MARKING ATTENDANCE =====
+    print('[SECURITY] Final verification: Checking location is not mocked before marking attendance...');
+    final finalLocationCheck = await _verifyLocationNotMocked();
+    if (!finalLocationCheck) {
+      print('[SECURITY] ⚠️  FINAL CHECK FAILED: Mock location detected before marking attendance!');
+      setState(() {
+        _frameState = 'error';
+        _statusMessage = 'Security Check Failed: Mock location detected.\nPlease disable location spoofing.';
+        _faceDetected = false;
+        _detectedEmpID = null;
+      });
+
+      // Reset to idle state after 4 seconds
+      Future.delayed(const Duration(seconds: 4), () {
+        if (mounted) {
+          setState(() {
+            _frameState = 'idle';
+            _statusMessage = 'Position your face in the frame';
+          });
+        }
+      });
+      return;
+    }
+
     setState(() {
       _frameState = 'success';
       _statusMessage = (result['sp_msg']?.toString().isNotEmpty == true && result['sp_msg'] != 'None')
@@ -572,8 +810,7 @@ class _FaceVerificationScreenState extends State<FaceVerificationScreen> {
     await Future.delayed(const Duration(milliseconds: 1500));
 
     if (mounted) {
-      Navigator.pop(context);
-      Navigator.push(
+      Navigator.pushReplacement(
         context,
         MaterialPageRoute(
           builder: (context) => LocationVerifiedSuccessScreen(
@@ -688,8 +925,46 @@ class _FaceVerificationScreenState extends State<FaceVerificationScreen> {
       // ===== COMPREHENSIVE MOCK LOCATION CHECK =====
       print('[SECURITY] Starting comprehensive mock location detection...');
 
+      // First, re-verify location is not mocked before proceeding
+      final locationIsGenuine = await _verifyLocationNotMocked();
+      if (!locationIsGenuine) {
+        print('[SECURITY] ⚠️  LOCATION NOT GENUINE - BLOCKING ATTENDANCE');
+        setState(() {
+          _faceDetected = false;
+          _detectedEmpID = null;
+          _isProcessing = false;
+          _frameState = 'error';
+          _statusMessage = 'Security Alert: Mock location detected.\nPlease disable location spoofing and try again.';
+        });
+
+        // Reset to idle state after 4 seconds
+        Future.delayed(const Duration(seconds: 4), () {
+          if (mounted && !_faceDetected) {
+            setState(() {
+              _frameState = 'idle';
+              _statusMessage = 'Position your face in the frame';
+            });
+          }
+        });
+        return;
+      }
+
+      // Get fresh location coordinates for verification
+      try {
+        Position freshPosition = await Geolocator.getCurrentPosition(
+          desiredAccuracy: LocationAccuracy.high,
+          timeLimit: const Duration(seconds: 5),
+        );
+        _currentLatitude = freshPosition.latitude;
+        _currentLongitude = freshPosition.longitude;
+        print('[SECURITY] Fresh location obtained: $_currentLatitude, $_currentLongitude');
+      } catch (e) {
+        print('[SECURITY] Could not get fresh location: $e');
+        // Continue with old location if fresh fetch fails
+      }
+
       if (_currentLatitude != null && _currentLongitude != null) {
-        // Perform multi-layer mock detection
+        // Perform multi-layer mock detection with fresh location data
         final mockCheckResult = await MockLocationService.performComprehensiveCheck(
           latitude: _currentLatitude!,
           longitude: _currentLongitude!,
@@ -752,8 +1027,7 @@ class _FaceVerificationScreenState extends State<FaceVerificationScreen> {
 
         // Navigate back with success
         if (mounted) {
-          Navigator.pop(context);
-          Navigator.push(
+          Navigator.pushReplacement(
             context,
             MaterialPageRoute(
               builder: (context) => LocationVerifiedSuccessScreen(
@@ -950,6 +1224,78 @@ class _FaceVerificationScreenState extends State<FaceVerificationScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // If mock location is detected, show the warning screen instead of camera
+    if (_isMockLocationDetected) {
+      return Scaffold(
+        backgroundColor: const Color(0xFF1e2a3a),
+        body: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(32.0),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                const Icon(
+                  Icons.warning_amber_rounded,
+                  color: Colors.orangeAccent,
+                  size: 80,
+                ),
+                const SizedBox(height: 24),
+                const Text(
+                  'Mock Location Detected',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 22,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                const SizedBox(height: 16),
+                const Text(
+                  'Your device is using a mock location app or location spoofing is enabled.\n\nPlease disable mock locations in your device settings to continue marking attendance.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    color: Colors.white70,
+                    fontSize: 16,
+                    height: 1.5,
+                  ),
+                ),
+                const SizedBox(height: 32),
+                ElevatedButton.icon(
+                  onPressed: () {
+                    // Retry the check
+                    _retryMockLocationCheck();
+                  },
+                  icon: const Icon(Icons.refresh),
+                  label: const Text('Retry'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF4CAF50),
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 24,
+                      vertical: 14,
+                    ),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                TextButton(
+                  onPressed: () {
+                    Navigator.pop(context);
+                  },
+                  child: const Text(
+                    'Go Back',
+                    style: TextStyle(color: Colors.white70),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+
     return Scaffold(
       backgroundColor: Colors.black,
       extendBodyBehindAppBar: true,
