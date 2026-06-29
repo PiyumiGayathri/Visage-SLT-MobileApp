@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'location_verified_screen.dart';
 import 'package:visage_app/services/mock_location_service.dart';
 import 'package:visage_app/mock_location_warning_screen.dart';
+import 'package:visage_app/services/activation_service.dart';
+import 'package:visage_app/activation_screen.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -23,7 +25,33 @@ class MyApp extends StatelessWidget {
         ),
         useMaterial3: true,
       ),
-      home: const InitialCheckScreen(),
+      home: const AppEntryPoint(),
+    );
+  }
+}
+
+/// Decides whether to show [ActivationScreen] or go straight to [InitialCheckScreen].
+class AppEntryPoint extends StatelessWidget {
+  const AppEntryPoint({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<bool>(
+      future: ActivationService.isDeviceActivated(),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Scaffold(
+            body: Center(child: CircularProgressIndicator()),
+          );
+        }
+
+        final isActivated = snapshot.data ?? false;
+        if (isActivated) {
+          return const InitialCheckScreen();
+        } else {
+          return const ActivationScreen();
+        }
+      },
     );
   }
 }
