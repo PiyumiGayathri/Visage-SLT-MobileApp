@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
 import 'face_verification_screen.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'attendance_history_screen.dart';
+import 'package:visage_app/services/attendance_history_service.dart';
 
 class LocationVerifiedScreen extends StatelessWidget {
   const LocationVerifiedScreen({super.key});
@@ -37,8 +40,48 @@ class LocationVerifiedScreen extends StatelessWidget {
   }
 }
 
-class VerificationCard extends StatelessWidget {
+class VerificationCard extends StatefulWidget {
   const VerificationCard({super.key});
+
+  @override
+  State<VerificationCard> createState() => _VerificationCardState();
+}
+
+class _VerificationCardState extends State<VerificationCard> {
+  String? _savedEmployeeId;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadSavedEmployeeId();
+    AttendanceHistoryService.savedEmployeeIdNotifier.addListener(_onEmployeeIdChanged);
+  }
+
+  @override
+  void dispose() {
+    AttendanceHistoryService.savedEmployeeIdNotifier.removeListener(_onEmployeeIdChanged);
+    super.dispose();
+  }
+
+  void _onEmployeeIdChanged() {
+    setState(() {
+      _savedEmployeeId = AttendanceHistoryService.savedEmployeeIdNotifier.value;
+    });
+  }
+
+  Future<void> _loadSavedEmployeeId() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final savedId = prefs.getString('saved_employee_id');
+      setState(() {
+        _savedEmployeeId = savedId;
+      });
+      AttendanceHistoryService.savedEmployeeIdNotifier.value = savedId;
+      print('Loaded saved employee ID: $savedId');
+    } catch (e) {
+      print('Error loading saved employee ID: $e');
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -71,27 +114,46 @@ class VerificationCard extends StatelessWidget {
           ActionButton(
             label: 'Clock In',
             color: const Color(0xFF4CAF50),
-            onPressed: () {
-              Navigator.push(
+            onPressed: () async {
+              await Navigator.push(
                 context,
                 MaterialPageRoute(
                   builder: (context) => const FaceVerificationScreen(action: 'in'),
                 ),
               );
+              _loadSavedEmployeeId();
             },
           ),
           const SizedBox(height: 16),
           ActionButton(
             label: 'Clock Out',
             color: const Color(0xFFE53935),
-            onPressed: () {
-              Navigator.push(
+            onPressed: () async {
+              await Navigator.push(
                 context,
                 MaterialPageRoute(
                   builder: (context) => const FaceVerificationScreen(action: 'out'),
                 ),
               );
+              _loadSavedEmployeeId();
             },
+          ),
+          const SizedBox(height: 16),
+          ActionButton(
+            label: 'Attendance History',
+            color: const Color(0xFF5865F2),
+            onPressed: _savedEmployeeId != null
+                ? () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) => AttendanceHistoryScreen(
+                          employeeId: _savedEmployeeId!,
+                        ),
+                      ),
+                    );
+                  }
+                : null,
           ),
         ],
       ),
@@ -175,7 +237,7 @@ class StatusMessage extends StatelessWidget {
 class ActionButton extends StatelessWidget {
   final String label;
   final Color color;
-  final VoidCallback onPressed;
+  final VoidCallback? onPressed;
 
   const ActionButton({
     super.key,
@@ -186,19 +248,20 @@ class ActionButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final bool isEnabled = onPressed != null;
     return SizedBox(
       width: double.infinity,
       child: ElevatedButton(
         onPressed: onPressed,
         style: ElevatedButton.styleFrom(
-          backgroundColor: color,
-          foregroundColor: Colors.white,
+          backgroundColor: isEnabled ? color : Colors.white.withOpacity(0.08),
+          foregroundColor: isEnabled ? Colors.white : Colors.white38,
           padding: const EdgeInsets.symmetric(vertical: 18),
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(12),
           ),
-          elevation: 4,
-          shadowColor: color.withOpacity(0.5),
+          elevation: isEnabled ? 4 : 0,
+          shadowColor: isEnabled ? color.withOpacity(0.5) : Colors.transparent,
         ),
         child: Text(
           label,

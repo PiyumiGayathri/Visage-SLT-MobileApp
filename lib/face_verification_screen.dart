@@ -9,6 +9,8 @@ import 'package:flutter/foundation.dart'; // For WriteBuffer
 import 'location_verified_success_screen.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:visage_app/services/mock_location_service.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:visage_app/services/attendance_history_service.dart';
 
 class FaceVerificationScreen extends StatefulWidget {
   final String action; // 'in' or 'out'
@@ -768,61 +770,71 @@ class _FaceVerificationScreenState extends State<FaceVerificationScreen> {
   }
 
   /// Handle successful verification
-  Future<void> _handleVerificationSuccess(Map<String, dynamic> result) async {
-    String displayInfo = _formatDateTime(result);
-    String userId = result['user']?.toString() ?? 'Unknown';
+Future<void> _handleVerificationSuccess(Map<String, dynamic> result) async {
+  String displayInfo = _formatDateTime(result);
+  String userId = result['user']?.toString() ?? 'Unknown';
 
-    // ===== FINAL MOCK LOCATION CHECK BEFORE MARKING ATTENDANCE =====
-    print('[SECURITY] Final verification: Checking location is not mocked before marking attendance...');
-    final finalLocationCheck = await _verifyLocationNotMocked();
-    if (!finalLocationCheck) {
-      print('[SECURITY] ⚠️  FINAL CHECK FAILED: Mock location detected before marking attendance!');
-      setState(() {
-        _frameState = 'error';
-        _statusMessage = 'Security Check Failed: Mock location detected.\nPlease disable location spoofing.';
-        _faceDetected = false;
-        _detectedEmpID = null;
-      });
-
-      // Reset to idle state after 4 seconds
-      Future.delayed(const Duration(seconds: 4), () {
-        if (mounted) {
-          setState(() {
-            _frameState = 'idle';
-            _statusMessage = 'Position your face in the frame';
-          });
-        }
-      });
-      return;
-    }
-
+  // ===== FINAL MOCK LOCATION CHECK BEFORE MARKING ATTENDANCE =====
+  print('[SECURITY] Final verification: Checking location is not mocked before marking attendance...');
+  final finalLocationCheck = await _verifyLocationNotMocked();
+  if (!finalLocationCheck) {
+    print('[SECURITY] ⚠️  FINAL CHECK FAILED: Mock location detected before marking attendance!');
     setState(() {
-      _frameState = 'success';
-      _statusMessage = (result['sp_msg']?.toString().isNotEmpty == true && result['sp_msg'] != 'None')
-          ? result['sp_msg']
-          : (result['msg2']?.toString().isNotEmpty == true ? result['msg2'] : 'Face verified!');
-      _detectedEmpID = result['user'];
-      _faceDetected = true;
+      _frameState = 'error';
+      _statusMessage = 'Security Check Failed: Mock location detected.\nPlease disable location spoofing.';
+      _faceDetected = false;
+      _detectedEmpID = null;
     });
 
-    // Stop timer and navigate
-    _captureTimer?.cancel();
-    await Future.delayed(const Duration(milliseconds: 1500));
-
-    if (mounted) {
-      Navigator.pushReplacement(
-        context,
-        MaterialPageRoute(
-          builder: (context) => LocationVerifiedSuccessScreen(
-            action: widget.action,
-            userId: userId,
-            dateTime: displayInfo.split(' | ').last,
-            message: result['msg2']?.toString() ?? "Let's make it a great day.",
-          ),
-        ),
-      );
-    }
+    // Reset to idle state after 4 seconds
+    Future.delayed(const Duration(seconds: 4), () {
+      if (mounted) {
+        setState(() {
+          _frameState = 'idle';
+          _statusMessage = 'Position your face in the frame';
+        });
+      }
+    });
+    return;
   }
+
+  // ===== SAVE EMPLOYEE ID SO ATTENDANCE HISTORY BUTTON IS ENABLED =====
+  try {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('saved_employee_id', userId);
+    AttendanceHistoryService.savedEmployeeIdNotifier.value = userId;
+    print('Successfully saved employee ID to SharedPreferences: $userId');
+  } catch (e) {
+    print('Failed to save employee ID: $e');
+  }
+
+  setState(() {
+    _frameState = 'success';
+    _statusMessage = (result['sp_msg']?.toString().isNotEmpty == true && result['sp_msg'] != 'None')
+        ? result['sp_msg']
+        : (result['msg2']?.toString().isNotEmpty == true ? result['msg2'] : 'Face verified!');
+    _detectedEmpID = result['user'];
+    _faceDetected = true;
+  });
+
+  // Stop timer and navigate
+  _captureTimer?.cancel();
+  await Future.delayed(const Duration(milliseconds: 1500));
+
+  if (mounted) {
+    Navigator.pushReplacement(
+      context,
+      MaterialPageRoute(
+        builder: (context) => LocationVerifiedSuccessScreen(
+          action: widget.action,
+          userId: userId,
+          dateTime: displayInfo.split(' | ').last,
+          message: result['msg2']?.toString() ?? "Let's make it a great day.",
+        ),
+      ),
+    );
+  }
+}
 
   /// Handle failed verification
   Future<void> _handleVerificationFailure(Map<String, dynamic> result) async {
@@ -1007,6 +1019,16 @@ class _FaceVerificationScreenState extends State<FaceVerificationScreen> {
 
       if (result['success'] == true) {
         print('Verification successful! User: ${result['user']}');
+
+        // Save employee ID to SharedPreferences for the history screen
+        try {
+          final prefs = await SharedPreferences.getInstance();
+          await prefs.setString('saved_employee_id', userId);
+          AttendanceHistoryService.savedEmployeeIdNotifier.value = userId;
+          print('Successfully saved employee ID to SharedPreferences: $userId');
+        } catch (e) {
+          print('Failed to save employee ID: $e');
+        }
 
         String displayInfo = _formatDateTime(result);
 
