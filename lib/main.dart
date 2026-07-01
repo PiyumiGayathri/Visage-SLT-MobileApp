@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'location_verified_screen.dart';
 import 'package:visage_app/services/mock_location_service.dart';
 import 'package:visage_app/mock_location_warning_screen.dart';
@@ -7,6 +8,7 @@ import 'package:visage_app/activation_screen.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
+  SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
   runApp(const MyApp());
 }
 
