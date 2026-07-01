@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
+import 'dart:async';
 
-class LocationVerifiedSuccessScreen extends StatelessWidget {
+class LocationVerifiedSuccessScreen extends StatefulWidget{
   final String action; // 'in' or 'out'
   final String userId;
   final String dateTime;
@@ -13,6 +14,31 @@ class LocationVerifiedSuccessScreen extends StatelessWidget {
     required this.dateTime,
     required this.message,
   });
+
+  @override
+  State<LocationVerifiedSuccessScreen> createState() =>
+      _LocationVerifiedSuccessScreenState();
+}
+
+class _LocationVerifiedSuccessScreenState
+    extends State<LocationVerifiedSuccessScreen> {
+  Timer? _autoCloseTimer;
+
+  @override
+  void initState() {
+    super.initState();
+    _autoCloseTimer = Timer(const Duration(seconds: 5), () {
+      if (mounted) {
+        Navigator.popUntil(context, (route) => route.isFirst);
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _autoCloseTimer?.cancel();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -55,7 +81,7 @@ class LocationVerifiedSuccessScreen extends StatelessWidget {
 
               // Title
               Text(
-                action == 'in' ? 'Clock-In Successful' : 'Clock-Out Successful',
+                widget.action == 'in' ? 'Clock-In Successful' : 'Clock-Out Successful',
                 style: const TextStyle(
                   color: Colors.white,
                   fontSize: 24,
@@ -66,7 +92,7 @@ class LocationVerifiedSuccessScreen extends StatelessWidget {
 
               // Message
               Text(
-                message.isNotEmpty ? message : "Let's make it a great day.",
+                widget.message.isNotEmpty ? widget.message : "Let's make it a great day.",
                 textAlign: TextAlign.center,
                 style: const TextStyle(
                   color: Colors.white70,
@@ -95,7 +121,7 @@ class LocationVerifiedSuccessScreen extends StatelessWidget {
                     ),
                     const SizedBox(height: 8),
                     Text(
-                      userId,
+                      widget.userId,
                       style: const TextStyle(
                         color: Colors.white,
                         fontSize: 18,
@@ -112,7 +138,7 @@ class LocationVerifiedSuccessScreen extends StatelessWidget {
                     ),
                     const SizedBox(height: 8),
                     Text(
-                      dateTime,
+                      widget.dateTime,
                       style: const TextStyle(
                         color: Colors.white,
                         fontSize: 18,
@@ -129,9 +155,10 @@ class LocationVerifiedSuccessScreen extends StatelessWidget {
                 width: double.infinity,
                 child: ElevatedButton(
                   onPressed: () {
-                    // Pop back to home screen
-                    Navigator.popUntil(context, (route) => route.isFirst);
-                  },
+  _autoCloseTimer?.cancel();
+  // Pop back to home screen
+  Navigator.popUntil(context, (route) => route.isFirst);
+},
                   style: ElevatedButton.styleFrom(
                     backgroundColor: const Color(0xFF5865F2),
                     foregroundColor: Colors.white,
