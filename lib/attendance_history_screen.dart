@@ -55,9 +55,10 @@ class _AttendanceHistoryScreenState extends State<AttendanceHistoryScreen> {
 
     try {
       final records = await AttendanceHistoryService.fetchHistory(
-        employeeId: widget.employeeId,
-        startDate: _fmt(_firstOfMonth),
-        endDate: _fmt(_lastOfMonth),
+      employeeId: '019918',        // TEMP HARDCODE FOR TESTING
+      startDate: '2026-06-01',     // TEMP HARDCODE FOR TESTING
+      endDate: '2026-06-30',       // TEMP HARDCODE FOR TESTING
+      limit: 10,                   // TEMP HARDCODE FOR TESTING
       );
       if (mounted) {
         setState(() {
@@ -118,14 +119,14 @@ class _AttendanceHistoryScreenState extends State<AttendanceHistoryScreen> {
 
   // ── Palette ───────────────────────────────────────────────────────────────
 
-  static const _bg        = Color(0xFF0F1322);
-  static const _card      = Color(0xFF1C2237);
-  static const _cardBorder= Color(0xFF2C3454);
-  static const _accent    = Color(0xFF5865F2);
-  static const _green     = Color(0xFF3DD68C);
-  static const _amber     = Color(0xFFFFB547);
-  static const _textPrimary   = Colors.white;
-  static const _textSecondary = Color(0xFF8B9CC0);
+ static const _bg        = Color(0xFFF4F6F9);   // soft neutral background instead of near-black
+  static const _card      = Color(0xFFFFFFFF);   // plain white cards instead of dark navy
+  static const _cardBorder= Color(0xFFE1E5EC);   // light grey border instead of dark slate
+  static const _accent    = Color(0xFF3B5FE0);   // calmer blue, less saturated than the old neon indigo
+  static const _green     = Color(0xFF2E9E5B);   // muted, readable green instead of neon mint
+  static const _amber     = Color(0xFFB8720C);   // deeper amber that reads clearly on white (the old bright amber is hard to read on light backgrounds)
+  static const _textPrimary   = Color(0xFF1B1F27); // near-black instead of pure white
+  static const _textSecondary = Color(0xFF667085); // medium grey instead of pale blue-grey
 
   // ── Build ─────────────────────────────────────────────────────────────────
 
