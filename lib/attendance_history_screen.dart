@@ -119,14 +119,16 @@ class _AttendanceHistoryScreenState extends State<AttendanceHistoryScreen> {
 
   // ── Palette ───────────────────────────────────────────────────────────────
 
- static const _bg        = Color(0xFFF4F6F9);   // soft neutral background instead of near-black
-  static const _card      = Color(0xFFFFFFFF);   // plain white cards instead of dark navy
-  static const _cardBorder= Color(0xFFE1E5EC);   // light grey border instead of dark slate
-  static const _accent    = Color(0xFF3B5FE0);   // calmer blue, less saturated than the old neon indigo
-  static const _green     = Color(0xFF2E9E5B);   // muted, readable green instead of neon mint
-  static const _amber     = Color(0xFFB8720C);   // deeper amber that reads clearly on white (the old bright amber is hard to read on light backgrounds)
-  static const _textPrimary   = Color(0xFF1B1F27); // near-black instead of pure white
-  static const _textSecondary = Color(0xFF667085); // medium grey instead of pale blue-grey
+  static const _bg        = Color(0xFF434B5E);  //restored original dark page background
+  static const _card      = Color(0xFFE4E8F0);   // the old background tone now used for day containers
+  static const _cardBorder= Color(0xFFC7CEDB);
+  static const _accent    = Color(0xFF2F5CFF);
+  static const _green     = Color(0xFF14A44D);
+  static const _amber     = Color(0xFFE08900);
+  static const _textPrimary   = Colors.white;         // page-level text (title, month label, empty/error states) — needs to read on dark bg
+  static const _textSecondary = Color(0xFF8B9CC0);    // page-level secondary text
+  static const _textOnCard        = Color(0xFF1B1F27); // text inside the light day cards — needs to read on light bg
+  static const _textOnCardSecondary = Color(0xFF667085);
 
   // ── Build ─────────────────────────────────────────────────────────────────
 
@@ -166,8 +168,8 @@ class _AttendanceHistoryScreenState extends State<AttendanceHistoryScreen> {
                 borderRadius: BorderRadius.circular(12),
                 border: Border.all(color: _cardBorder),
               ),
-              child: const Icon(Icons.arrow_back_ios_new_rounded,
-                  color: _textPrimary, size: 18),
+             child: const Icon(Icons.arrow_back_ios_new_rounded,
+                  color: _textOnCard, size: 18),
             ),
           ),
           const SizedBox(width: 16),
@@ -205,9 +207,9 @@ class _AttendanceHistoryScreenState extends State<AttendanceHistoryScreen> {
               width: 40,
               height: 40,
               decoration: BoxDecoration(
-                color: _accent.withAlpha(30),
+                color: _card,
                 borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: _accent.withAlpha(80)),
+                border: Border.all(color: _accent, width: 1.4),
               ),
               child: const Icon(Icons.refresh_rounded, color: _accent, size: 20),
             ),
@@ -272,7 +274,7 @@ class _AttendanceHistoryScreenState extends State<AttendanceHistoryScreen> {
         ),
         child: Icon(
           icon,
-          color: enabled ? _textPrimary : _textSecondary.withAlpha(80),
+          color: enabled ? _textOnCard : _textOnCardSecondary.withAlpha(150),
           size: 22,
         ),
       ),
@@ -307,9 +309,9 @@ class _AttendanceHistoryScreenState extends State<AttendanceHistoryScreen> {
       child: Container(
         padding: const EdgeInsets.symmetric(vertical: 10),
         decoration: BoxDecoration(
-          color: color.withAlpha(20),
+          color: _card,
           borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: color.withAlpha(60)),
+          border: Border.all(color: color, width: 1.4),
         ),
         child: Column(
           children: [
@@ -325,8 +327,9 @@ class _AttendanceHistoryScreenState extends State<AttendanceHistoryScreen> {
             Text(
               label,
               style: TextStyle(
-                color: color.withAlpha(180),
+                color: color,
                 fontSize: 11,
+                fontWeight: FontWeight.w600,
               ),
             ),
           ],
@@ -450,96 +453,134 @@ class _AttendanceHistoryScreenState extends State<AttendanceHistoryScreen> {
     return Container(
       decoration: BoxDecoration(
         color: _card,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: _cardBorder),
-      ),
-      padding: const EdgeInsets.all(16),
-      child: Row(
-        children: [
-          // Date bubble
-          Container(
-            width: 52,
-            height: 60,
-            decoration: BoxDecoration(
-              color: _accent.withAlpha(25),
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: _accent.withAlpha(60)),
-            ),
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Text(
-                  DateTime.parse(record.date).day.toString(),
-                  style: const TextStyle(
-                    color: _accent,
-                    fontSize: 20,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-                Text(
-                  _weekdayShort(record.date),
-                  style: TextStyle(
-                    color: _accent.withAlpha(180),
-                    fontSize: 11,
-                  ),
-                ),
-              ],
-            ),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: _cardBorder, width: 1.2),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withAlpha(10),
+            blurRadius: 8,
+            offset: const Offset(0, 3),
           ),
-          const SizedBox(width: 14),
-
-          // Details
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  _fmtDateLabel(record.date),
-                  style: const TextStyle(
-                    color: _textPrimary,
-                    fontSize: 14,
-                    fontWeight: FontWeight.w600,
-                  ),
+        ],
+      ),
+      padding: const EdgeInsets.all(18),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Top row: date + status badge
+          Row(
+            children: [
+              // Date bubble (larger)
+              Container(
+                width: 64,
+                height: 72,
+                decoration: BoxDecoration(
+                  color: _accent.withAlpha(30),
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(color: _accent.withAlpha(90)),
                 ),
-                const SizedBox(height: 8),
-                Row(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    _timeChip(Icons.login_rounded, 'IN', _fmtTime(record.clockIn), _green),
-                    const SizedBox(width: 8),
-                    _timeChip(Icons.logout_rounded, 'OUT', _fmtTime(record.clockOut), _amber),
+                    Text(
+                      DateTime.parse(record.date).day.toString(),
+                      style: const TextStyle(
+                        color: _accent,
+                        fontSize: 26,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    Text(
+                      _weekdayShort(record.date),
+                      style: const TextStyle(
+                        color: _accent,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
                   ],
                 ),
-              ],
-            ),
-          ),
+              ),
+              const SizedBox(width: 16),
 
-          // Hours + status
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: [
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                decoration: BoxDecoration(
-                  color: statusColor.withAlpha(25),
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: statusColor.withAlpha(80)),
-                ),
-                child: Text(
-                  isComplete ? 'Complete' : 'Incomplete',
-                  style: TextStyle(
-                    color: statusColor,
-                    fontSize: 11,
-                    fontWeight: FontWeight.w600,
-                  ),
+              // Full date label + status badge
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      _fmtDateLabel(record.date),
+                      style: const TextStyle(
+                        color: _textOnCard,
+                        fontSize: 17,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                      decoration: BoxDecoration(
+                        color: statusColor.withAlpha(60),
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(color: statusColor, width: 1.4),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            isComplete ? Icons.check_circle_rounded : Icons.error_outline_rounded,
+                            color: statusColor,
+                            size: 16,
+                          ),
+                          const SizedBox(width: 6),
+                          Text(
+                            isComplete ? 'Complete' : 'Incomplete',
+                            style: TextStyle(
+                              color: statusColor,
+                              fontSize: 13,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
                 ),
               ),
-              const SizedBox(height: 8),
-              Text(
-                record.hoursWorked,
-                style: const TextStyle(
-                  color: _textSecondary,
-                  fontSize: 13,
-                  fontWeight: FontWeight.w500,
+            ],
+          ),
+
+          const SizedBox(height: 16),
+          Divider(color: _cardBorder, height: 1),
+          const SizedBox(height: 16),
+
+          // Detailed IN / OUT / Hours row
+          Row(
+            children: [
+              Expanded(
+                child: _detailBlock(
+                  icon: Icons.login_rounded,
+                  label: 'Clock In',
+                  value: _fmtTime(record.clockIn),
+                  color: _green,
+                ),
+              ),
+              Container(width: 1, height: 44, color: _cardBorder),
+              Expanded(
+                child: _detailBlock(
+                  icon: Icons.logout_rounded,
+                  label: 'Clock Out',
+                  value: _fmtTime(record.clockOut),
+                  color: _amber,
+                ),
+              ),
+              Container(width: 1, height: 44, color: _cardBorder),
+              Expanded(
+                child: _detailBlock(
+                  icon: Icons.timelapse_rounded,
+                  label: 'Total Hours',
+                  value: record.hoursWorked,
+                  color: _accent,
                 ),
               ),
             ],
@@ -549,11 +590,47 @@ class _AttendanceHistoryScreenState extends State<AttendanceHistoryScreen> {
     );
   }
 
+  Widget _detailBlock({
+    required IconData icon,
+    required String label,
+    required String value,
+    required Color color,
+  }) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Icon(icon, color: color, size: 15),
+            const SizedBox(width: 4),
+            Text(
+              label,
+              style: const TextStyle(
+                color: _textOnCardSecondary,
+                fontSize: 11,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 4),
+        Text(
+          value,
+          style: TextStyle(
+            color: _textOnCard,
+            fontSize: 15,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+      ],
+    );
+  }
+
   Widget _timeChip(IconData icon, String label, String time, Color color) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
       decoration: BoxDecoration(
-        color: color.withAlpha(15),
+        color: color.withAlpha(30),
         borderRadius: BorderRadius.circular(8),
       ),
       child: Row(
