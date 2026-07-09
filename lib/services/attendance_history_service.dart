@@ -21,10 +21,10 @@ class AttendanceRecord {
     return AttendanceRecord(
       date: json['date'] as String,
       clockIn: json['clockIn'] != null
-          ? DateTime.parse(json['clockIn'] as String).toLocal()
+          ? DateTime.parse(json['clockIn'] as String)
           : null,
       clockOut: json['clockOut'] != null
-          ? DateTime.parse(json['clockOut'] as String).toLocal()
+          ? DateTime.parse(json['clockOut'] as String)
           : null,
       status: json['status'] as String,
     );
@@ -47,13 +47,13 @@ class AttendanceHistoryService {
   static final ValueNotifier<String?> savedEmployeeIdNotifier =
       ValueNotifier<String?>(null);
 
-      // The same SecretKey used during device activation.
+  // The same SecretKey used during device activation.
   static const String _secretKey = 'EYtpDMnJ4aLgPZjKElzUpZ0I';
 
   // SharedPreferences keys (must match what ActivationService writes)
-  static const String _prefClientKey  = 'client_key';
+  static const String _prefClientKey = 'client_key';
   static const String _prefEmployeeId = 'saved_employee_id';
-  static const String _prefGroupName  = 'group_name';
+  static const String _prefGroupName = 'group_name';
 
   // ── Credential / data helpers ─────────────────────────────────────────────
 
@@ -102,7 +102,7 @@ class AttendanceHistoryService {
     int limit = 50,
   }) async {
     // 1. Load credentials and group from local storage
-    final prefs     = await SharedPreferences.getInstance();
+    final prefs = await SharedPreferences.getInstance();
     final clientKey = prefs.getString(_prefClientKey) ?? '';
 
     // 3. Build URI with all required query parameters
@@ -133,35 +133,43 @@ class AttendanceHistoryService {
     // 3. Build the URI using pathSegments so each segment is individually
     //    percent-encoded by Dart (critical for slt_interns where the ID
     //    contains literal slashes and spaces that must become %2F/%20).
-    final uri = Uri(
-      scheme: 'https',
-      host: 'visage.sltdigitallab.lk',
-      pathSegments: [
-        'api', 'v1', 'attendance', 'history', groupName, idForPath,
-      ],
-    ).replace(
-      queryParameters: {
-        'startDate': startDate,
-        'endDate':   endDate,
-        'limit':     limit.toString(),
-        'ClientKey': clientKey,
-        'SecretKey': _secretKey,
-      },
-    );
+    final uri =
+        Uri(
+          scheme: 'https',
+          host: 'visage.sltdigitallab.lk',
+          pathSegments: [
+            'api',
+            'v1',
+            'attendance',
+            'history',
+            groupName,
+            idForPath,
+          ],
+        ).replace(
+          queryParameters: {
+            'startDate': startDate,
+            'endDate': endDate,
+            'limit': limit.toString(),
+            'ClientKey': clientKey,
+            'SecretKey': _secretKey,
+          },
+        );
 
     // 4. Execute request
     final response = await http.get(uri).timeout(const Duration(seconds: 15));
 
     if (response.statusCode != 200) {
       throw Exception(
-          'Failed to load attendance history (HTTP ${response.statusCode})');
+        'Failed to load attendance history (HTTP ${response.statusCode})',
+      );
     }
 
     final body = jsonDecode(response.body) as Map<String, dynamic>;
 
     if (body['success'] != true) {
       throw Exception(
-          body['message']?.toString() ?? 'Unknown error from server');
+        body['message']?.toString() ?? 'Unknown error from server',
+      );
     }
 
     final historyJson = (body['data']?['history'] as List<dynamic>?) ?? [];
