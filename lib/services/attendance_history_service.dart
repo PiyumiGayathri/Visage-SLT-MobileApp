@@ -47,22 +47,26 @@ class AttendanceHistoryService {
   static final ValueNotifier<String?> savedEmployeeIdNotifier =
       ValueNotifier<String?>(null);
 
-  static const String _baseUrl =
-      'https://visage.sltdigitallab.lk/api/v1/attendance/history/slt';
-
       // The same SecretKey used during device activation.
   static const String _secretKey = 'EYtpDMnJ4aLgPZjKElzUpZ0I';
 
   // SharedPreferences keys (must match what ActivationService writes)
   static const String _prefClientKey  = 'client_key';
   static const String _prefEmployeeId = 'saved_employee_id';
+  static const String _prefGroupName  = 'group_name';
 
-  // ── Credential helpers ────────────────────────────────────────────────────
+  // ── Credential / data helpers ─────────────────────────────────────────────
 
   /// Reads the stored ClientKey (= activation code entered by the user).
   static Future<String?> getClientKey() async {
     final prefs = await SharedPreferences.getInstance();
     return prefs.getString(_prefClientKey);
+  }
+
+  /// Reads the stored employee group (e.g. 'slt' or 'slt_interns').
+  static Future<String?> getGroupName() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getString(_prefGroupName);
   }
 
   /// Reads the last-marked employee ID from local storage.
@@ -85,30 +89,57 @@ class AttendanceHistoryService {
   /// Fetches attendance history for [employeeId] within the given date range.
   ///
   /// [startDate] and [endDate] must be in 'yyyy-MM-dd' format.
-  /// [ClientKey] (the stored activation code) and [SecretKey] are appended
-  /// automatically as query parameters so no caller needs to supply them.
+  ///
+  /// The URL shape is determined by the group stored at activation time:
+  ///   • slt         → .../history/slt/019918?...
+  ///   • slt_interns → .../history/slt_interns/InSP%2F2025%2F6025%2F199%20-%20Adithya?...
+  ///
+  /// [ClientKey] and [SecretKey] are appended automatically as query params.
   static Future<List<AttendanceRecord>> fetchHistory({
     required String employeeId,
     required String startDate,
     required String endDate,
     int limit = 50,
   }) async {
-    // 1. Clean the employee ID (strip optional " - Name" suffix)
-    String cleanId = employeeId;
-    if (cleanId.contains(' - ')) {
-      cleanId = cleanId.split(' - ')[0].trim();
-    } else {
-      cleanId = cleanId.trim();
-    }
-
-    // 2. Load ClientKey from local storage (written at activation time)
+    // 1. Load credentials and group from local storage
     final prefs     = await SharedPreferences.getInstance();
     final clientKey = prefs.getString(_prefClientKey) ?? '';
 
     // 3. Build URI with all required query parameters
 
-    final encodedId = Uri.encodeComponent(cleanId);
-    final uri = Uri.parse('$_baseUrl/$encodedId').replace(
+    final groupName = prefs.getString(_prefGroupName) ?? 'slt';
+
+    // 2. Determine the ID to embed in the URL path based on the group.
+    //
+    //    slt:         Strip the " - Name" suffix; IDs are plain numbers like
+    //                 "019918" that need no special encoding.
+    //
+    //    slt_interns: Keep the FULL raw string (e.g. "InSP/2025/6025/199 - Adithya")
+    //                 and pass it as a single Uri path-segment so Dart
+    //                 automatically percent-encodes slashes → %2F and
+    //                 spaces → %20, producing the required URL shape.
+    final String idForPath;
+    if (groupName == 'slt_interns') {
+      idForPath = employeeId.trim(); // full raw ID; Uri will encode it
+    } else {
+      // slt (or any unknown group): strip optional " - Name" suffix
+      if (employeeId.contains(' - ')) {
+        idForPath = employeeId.split(' - ')[0].trim();
+      } else {
+        idForPath = employeeId.trim();
+      }
+    }
+
+    // 3. Build the URI using pathSegments so each segment is individually
+    //    percent-encoded by Dart (critical for slt_interns where the ID
+    //    contains literal slashes and spaces that must become %2F/%20).
+    final uri = Uri(
+      scheme: 'https',
+      host: 'visage.sltdigitallab.lk',
+      pathSegments: [
+        'api', 'v1', 'attendance', 'history', groupName, idForPath,
+      ],
+    ).replace(
       queryParameters: {
         'startDate': startDate,
         'endDate':   endDate,
