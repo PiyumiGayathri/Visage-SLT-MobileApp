@@ -6,9 +6,21 @@ class ActivationService {
   static const String _apiUrl =
       'https://visage.sltdigitallab.lk/api/v1/auth/validate-device';
   static const String _secretKey = 'EYtpDMnJ4aLgPZjKElzUpZ0I';
-  static const String _prefKeyActivated = 'device_activated';
-  static const String _prefKeyGroupName = 'group_name';
-  static const String _prefKeyApiKey = 'api_key';
+  static const String _prefKeyActivated  = 'device_activated';
+  static const String _prefKeyGroupName  = 'group_name';
+  static const String _prefKeyApiKey     = 'api_key';
+  static const String _prefKeyClientKey  = 'client_key';
+
+  /// Returns the SecretKey used by this app (same value that is sent during
+  /// device activation and required by the attendance-history endpoint).
+  static const String secretKey = _secretKey;
+
+  /// Reads the ClientKey (= the activation code the user entered) from local
+  /// storage. Returns null if the device has never been activated.
+  static Future<String?> getClientKey() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getString(_prefKeyClientKey);
+  }
 
   /// Returns true if this device has already been activated.
   static Future<bool> isDeviceActivated() async {
@@ -41,6 +53,8 @@ class ActivationService {
         await prefs.setBool(_prefKeyActivated, true);
         await prefs.setString(_prefKeyGroupName, groupName);
         await prefs.setString(_prefKeyApiKey, apiKey);
+        // Save the activation code as the ClientKey for the history API
+        await prefs.setString(_prefKeyClientKey, activationCode);
 
         return ActivationResult(
           success: true,
@@ -66,6 +80,7 @@ class ActivationService {
     await prefs.remove(_prefKeyActivated);
     await prefs.remove(_prefKeyGroupName);
     await prefs.remove(_prefKeyApiKey);
+    await prefs.remove(_prefKeyClientKey);
   }
 }
 

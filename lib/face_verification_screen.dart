@@ -9,7 +9,6 @@ import 'package:flutter/foundation.dart'; // For WriteBuffer
 import 'location_verified_success_screen.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:visage_app/services/mock_location_service.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'package:visage_app/services/attendance_history_service.dart';
 
 class FaceVerificationScreen extends StatefulWidget {
@@ -800,10 +799,8 @@ Future<void> _handleVerificationSuccess(Map<String, dynamic> result) async {
 
   // ===== SAVE EMPLOYEE ID SO ATTENDANCE HISTORY BUTTON IS ENABLED =====
   try {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString('saved_employee_id', userId);
-    AttendanceHistoryService.savedEmployeeIdNotifier.value = userId;
-    print('Successfully saved employee ID to SharedPreferences: $userId');
+    await AttendanceHistoryService.saveEmployeeId(userId);
+    print('Successfully saved employee ID: $userId');
   } catch (e) {
     print('Failed to save employee ID: $e');
   }
@@ -1020,12 +1017,10 @@ Future<void> _handleVerificationSuccess(Map<String, dynamic> result) async {
       if (result['success'] == true) {
         print('Verification successful! User: ${result['user']}');
 
-        // Save employee ID to SharedPreferences for the history screen
+        // Save employee ID via service (writes to SharedPreferences + fires notifier)
         try {
-          final prefs = await SharedPreferences.getInstance();
-          await prefs.setString('saved_employee_id', userId);
-          AttendanceHistoryService.savedEmployeeIdNotifier.value = userId;
-          print('Successfully saved employee ID to SharedPreferences: $userId');
+          await AttendanceHistoryService.saveEmployeeId(userId);
+          print('Successfully saved employee ID: $userId');
         } catch (e) {
           print('Failed to save employee ID: $e');
         }
