@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'face_verification_screen.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'attendance_history_screen.dart';
 import 'package:visage_app/services/attendance_history_service.dart';
 
@@ -71,11 +70,13 @@ class _VerificationCardState extends State<VerificationCard> {
 
   Future<void> _loadSavedEmployeeId() async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final savedId = prefs.getString('saved_employee_id');
-      setState(() {
-        _savedEmployeeId = savedId;
-      });
+      final savedId = await AttendanceHistoryService.getSavedEmployeeId();
+      if (mounted) {
+        setState(() {
+          _savedEmployeeId = savedId;
+        });
+      }
+      // Keep the notifier in sync so other listeners pick it up too
       AttendanceHistoryService.savedEmployeeIdNotifier.value = savedId;
       print('Loaded saved employee ID: $savedId');
     } catch (e) {

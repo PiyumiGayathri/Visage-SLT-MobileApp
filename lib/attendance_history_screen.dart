@@ -55,10 +55,10 @@ class _AttendanceHistoryScreenState extends State<AttendanceHistoryScreen> {
 
     try {
       final records = await AttendanceHistoryService.fetchHistory(
-      employeeId: '019918',        // TEMP HARDCODE FOR TESTING
-      startDate: '2026-06-01',     // TEMP HARDCODE FOR TESTING
-      endDate: '2026-06-30',       // TEMP HARDCODE FOR TESTING
-      limit: 10,                   // TEMP HARDCODE FOR TESTING
+      employeeId: widget.employeeId,
+        startDate:  _fmt(_firstOfMonth),
+        endDate:    _fmt(_lastOfMonth),
+        limit:      50,
       );
       if (mounted) {
         setState(() {
