@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/cupertino.dart';
 import 'services/attendance_history_service.dart';
 
 class AttendanceHistoryScreen extends StatefulWidget {
@@ -87,10 +88,22 @@ class _AttendanceHistoryScreenState extends State<AttendanceHistoryScreen> {
     final now = DateTime.now();
     final isCurrentOrFuture =
         _currentMonth.year > now.year ||
-        (_currentMonth.year == now.year && _currentMonth.month >= now.month);
+            (_currentMonth.year == now.year && _currentMonth.month >= now.month);
     if (isCurrentOrFuture) return; // Don't go into the future
     setState(() {
       _currentMonth = DateTime(_currentMonth.year, _currentMonth.month + 1);
+    });
+    _loadHistory();
+  }
+
+  void _resetToCurrentMonth() {
+    final now = DateTime.now();
+    final target = DateTime(now.year, now.month);
+    if (_currentMonth.year == target.year && _currentMonth.month == target.month) {
+      return; // already on current month
+    }
+    setState(() {
+      _currentMonth = target;
     });
     _loadHistory();
   }
@@ -234,17 +247,43 @@ class _AttendanceHistoryScreenState extends State<AttendanceHistoryScreen> {
           // Previous
           _navArrow(Icons.chevron_left_rounded, _previousMonth),
 
-          // Month label
-          Column(
+          // Month label (tap to open month/year picker) + reset-to-today
+          Row(
+            mainAxisSize: MainAxisSize.min,
             children: [
-              Text(
-                _monthLabel(_currentMonth),
-                style: const TextStyle(
-                  color: _textPrimary,
-                  fontSize: 18,
-                  fontWeight: FontWeight.w700,
+              GestureDetector(
+                onTap: _showMonthYearPicker,
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      _monthLabel(_currentMonth),
+                      style: const TextStyle(
+                        color: _textPrimary,
+                        fontSize: 18,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    const Icon(Icons.calendar_month_rounded,
+                        color: _textSecondary, size: 18),
+                  ],
                 ),
               ),
+              Builder(builder: (context) {
+                final now = DateTime.now();
+                final isCurrentMonth = _currentMonth.year == now.year &&
+                    _currentMonth.month == now.month;
+                if (isCurrentMonth) return const SizedBox.shrink();
+                return Padding(
+                  padding: const EdgeInsets.only(left: 8),
+                  child: GestureDetector(
+                    onTap: _resetToCurrentMonth,
+                    child: const Icon(Icons.restart_alt_rounded,
+                        color: _textPrimary, size: 30),
+                  ),
+                );
+              }),
             ],
           ),
 
@@ -278,6 +317,109 @@ class _AttendanceHistoryScreenState extends State<AttendanceHistoryScreen> {
           size: 22,
         ),
       ),
+    );
+  }
+
+  void _showMonthYearPicker() {
+    const months = [
+      'January', 'February', 'March', 'April', 'May', 'June',
+      'July', 'August', 'September', 'October', 'November', 'December'
+    ];
+
+    int pickedMonthIndex = _currentMonth.month - 1;
+    final years = List<int>.generate(11, (i) => DateTime.now().year - 5 + i);
+    int pickedYearIndex = years.indexOf(_currentMonth.year);
+    if (pickedYearIndex == -1) pickedYearIndex = years.indexOf(DateTime.now().year);
+
+    showDialog(
+      context: context,
+      builder: (context) {
+        return Dialog(
+          backgroundColor: _card,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(20, 24, 20, 8),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Text(
+                  'SELECT MONTH',
+                  style: TextStyle(
+                    color: _textOnCard,
+                    fontSize: 20,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                SizedBox(
+                  height: 160,
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: CupertinoPicker(
+                          scrollController:
+                          FixedExtentScrollController(initialItem: pickedMonthIndex),
+                          itemExtent: 36,
+                          onSelectedItemChanged: (i) => pickedMonthIndex = i,
+                          children: months
+                              .map((m) => Center(
+                            child: Text(m,
+                                style: const TextStyle(
+                                    color: _textOnCard, fontSize: 16)),
+                          ))
+                              .toList(),
+                        ),
+                      ),
+                      Expanded(
+                        child: CupertinoPicker(
+                          scrollController:
+                          FixedExtentScrollController(initialItem: pickedYearIndex),
+                          itemExtent: 36,
+                          onSelectedItemChanged: (i) => pickedYearIndex = i,
+                          children: years
+                              .map((y) => Center(
+                            child: Text(y.toString(),
+                                style: const TextStyle(
+                                    color: _textOnCard, fontSize: 16)),
+                          ))
+                              .toList(),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  children: [
+                    TextButton(
+                      onPressed: () => Navigator.pop(context),
+                      child: const Text('Cancel',
+                          style: TextStyle(color: _textOnCardSecondary)),
+                    ),
+                    TextButton(
+                      onPressed: () {
+                        final now = DateTime.now();
+                        final picked =
+                        DateTime(years[pickedYearIndex], pickedMonthIndex + 1);
+                        final isFuture = picked.year > now.year ||
+                            (picked.year == now.year && picked.month > now.month);
+                        Navigator.pop(context);
+                        if (!isFuture) {
+                          setState(() => _currentMonth = picked);
+                          _loadHistory();
+                        }
+                      },
+                      child: const Text('OK',
+                          style:
+                          TextStyle(color: _accent, fontWeight: FontWeight.w700)),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        );
+      },
     );
   }
 
