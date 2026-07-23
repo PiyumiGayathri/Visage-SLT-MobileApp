@@ -10,6 +10,7 @@ import 'location_verified_success_screen.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:visage_app/services/mock_location_service.dart';
 import 'package:visage_app/services/attendance_history_service.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 class FaceVerificationScreen extends StatefulWidget {
   final String action; // 'in' or 'out'
@@ -1117,11 +1118,16 @@ Future<void> _handleVerificationSuccess(Map<String, dynamic> result) async {
     try {
       print('Sending request to: $apiUrl');
 
+      // Read api key and group name saved during device activation
+      final prefs = await SharedPreferences.getInstance();
+      final apiKey   = prefs.getString('api_key')   ?? '';
+      final groupName = prefs.getString('group_name') ?? '';
+
       var request = http.MultipartRequest('POST', Uri.parse(apiUrl));
 
       // Add headers
-      request.headers['api'] = '26PytkCBcZ';
-      request.headers['user'] = 'slt_interns';
+      request.headers['api'] = apiKey;
+      request.headers['user'] = groupName;
       request.headers['other'] = widget.action == 'in' ? 'I' : 'O';
       request.headers['userlat'] = _currentLatitude.toString();
       request.headers['userlon'] = _currentLongitude.toString();
