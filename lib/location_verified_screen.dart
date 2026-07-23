@@ -103,58 +103,65 @@ class _VerificationCardState extends State<VerificationCard> {
           ),
         ],
       ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
+      child: Stack(
+        clipBehavior: Clip.none,
         children: [
-          const AppTitle(),
-          const SizedBox(height: 32),
-          const VerificationStatus(),
-          const SizedBox(height: 24),
-          const StatusMessage(),
-          const SizedBox(height: 40),
-          ActionButton(
-            label: 'Clock In',
-            color: const Color(0xFF4CAF50),
-            onPressed: () async {
-              await Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (context) => const FaceVerificationScreen(action: 'in'),
-                ),
-              );
-              _loadSavedEmployeeId();
-            },
+          Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const AppTitle(),
+              const SizedBox(height: 32),
+              const VerificationStatus(),
+              const SizedBox(height: 24),
+              const StatusMessage(),
+              const SizedBox(height: 40),
+              ActionButton(
+                label: 'Clock In',
+                color: const Color(0xFF4CAF50),
+                onPressed: () async {
+                  await Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => const FaceVerificationScreen(action: 'in'),
+                    ),
+                  );
+                  _loadSavedEmployeeId();
+                },
+              ),
+              const SizedBox(height: 16),
+              ActionButton(
+                label: 'Clock Out',
+                color: const Color(0xFFE53935),
+                onPressed: () async {
+                  await Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => const FaceVerificationScreen(action: 'out'),
+                    ),
+                  );
+                  _loadSavedEmployeeId();
+                },
+              ),
+            ],
           ),
-          const SizedBox(height: 16),
-          ActionButton(
-            label: 'Clock Out',
-            color: const Color(0xFFE53935),
-            onPressed: () async {
-              await Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (context) => const FaceVerificationScreen(action: 'out'),
-                ),
-              );
-              _loadSavedEmployeeId();
-            },
-          ),
-          const SizedBox(height: 16),
-          ActionButton(
-            label: 'Attendance History',
-            color: const Color(0xFF5865F2),
-            onPressed: _savedEmployeeId != null
-                ? () {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (context) => AttendanceHistoryScreen(
-                          employeeId: _savedEmployeeId!,
-                        ),
-                      ),
-                    );
-                  }
-                : null,
+          Positioned(
+            top: -8,
+            right: -8,
+            child: PremiumHistoryButton(
+              enabled: _savedEmployeeId != null,
+              onPressed: _savedEmployeeId != null
+                  ? () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => AttendanceHistoryScreen(
+                      employeeId: _savedEmployeeId!,
+                    ),
+                  ),
+                );
+              }
+                  : null,
+            ),
           ),
         ],
       ),
@@ -270,6 +277,45 @@ class ActionButton extends StatelessWidget {
             fontSize: MediaQuery.of(context).size.width > 400 ? 20 : 18,
             fontWeight: FontWeight.w600,
             letterSpacing: 1,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class PremiumHistoryButton extends StatelessWidget {
+  final bool enabled;
+  final VoidCallback? onPressed;
+
+  const PremiumHistoryButton({
+    super.key,
+    required this.enabled,
+    required this.onPressed,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final bool isSmall = MediaQuery.of(context).size.width <= 400;
+    final double size = isSmall ? 40 : 44;
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onPressed,
+        customBorder: const CircleBorder(),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 200),
+          width: size,
+          height: size,
+          decoration: const BoxDecoration(
+          shape: BoxShape.circle,
+          color: Colors.transparent,
+          ),
+          child: Icon(
+          Icons.history_rounded,
+          size: isSmall ? 28: 32,
+          color: enabled ? Colors.white : Colors.white38,
           ),
         ),
       ),
